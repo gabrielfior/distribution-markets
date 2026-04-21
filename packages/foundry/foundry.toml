@@ -47,3 +47,6 @@ int_types = "long"
 
 
 # See more config options https://book.getfoundry.sh/reference/config/overview
+[rpc_endpoints]
+gnosis = "https://rpc.gnosischain.com"
+gnosisChiado = "https://rpc.chiadochain.net"
