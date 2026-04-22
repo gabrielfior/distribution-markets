@@ -34,7 +34,7 @@ export default function MarketCard({ market }: { market: Market }) {
         </div>
         <div className="card-actions justify-end mt-2">
           <Link href={`/trade/${market.id}`} className="btn btn-primary btn-sm">
-            Trade
+            Explore
           </Link>
         </div>
       </div>
