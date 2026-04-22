@@ -31,7 +31,12 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
 
   return (
     <div className="space-y-6">
-      <DistributionCurve marketDistribution={marketDist} userDistribution={userDist} height={300} />
+      <DistributionCurve
+        marketDistribution={marketDist}
+        userDistribution={userDist}
+        height={300}
+        key={`${userMu}-${userSigma}`}
+      />
 
       <div className="bg-base-200 p-6 rounded-lg">
         <h3 className="text-lg font-bold mb-4">Your Prediction</h3>

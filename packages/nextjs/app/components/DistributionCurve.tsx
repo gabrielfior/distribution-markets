@@ -42,7 +42,15 @@ export default function DistributionCurve({
             formatter={value => (typeof value === "number" ? value.toExponential(2) : value)}
             labelFormatter={label => `Price: $${Number(label).toLocaleString()}`}
           />
-          <Line type="monotone" dataKey="market" stroke="#8884d8" strokeWidth={3} dot={false} name="Market consensus" />
+          <Line
+            type="monotone"
+            dataKey="market"
+            stroke="#8884d8"
+            strokeWidth={3}
+            dot={false}
+            name="Market consensus"
+            isAnimationActive={false}
+          />
           {userDistribution && userDistribution.length > 0 && (
             <Line
               type="monotone"
@@ -52,6 +60,7 @@ export default function DistributionCurve({
               dot={false}
               strokeDasharray="5 5"
               name="Your prediction"
+              isAnimationActive={false}
             />
           )}
           {actualPrice && (
