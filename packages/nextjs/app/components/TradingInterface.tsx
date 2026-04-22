@@ -216,11 +216,6 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
             </p>
           </div>
         </div>
-
-        <button className="btn btn-primary w-full mt-6">Submit Trade</button>
-        <p className="text-xs text-center text-base-content/50 mt-2">
-          Cost calculated based on how much you move the market
-        </p>
       </div>
     </div>
   );
