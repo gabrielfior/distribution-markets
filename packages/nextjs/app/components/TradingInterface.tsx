@@ -12,41 +12,56 @@ interface TradingInterfaceProps {
   };
 }
 
+function normalPDF(x: number, mu: number, sigma: number): number {
+  if (sigma <= 0) return 0;
+  const coeff = 1 / (sigma * Math.sqrt(2 * Math.PI));
+  const exponent = -0.5 * Math.pow((x - mu) / sigma, 2);
+  return coeff * Math.exp(exponent);
+}
+
 export default function TradingInterface({ market }: TradingInterfaceProps) {
   const [userMu, setUserMu] = useState(market.marketMu);
   const [userSigma, setUserSigma] = useState(market.marketSigma);
   const [resolutionValue, setResolutionValue] = useState(market.marketMu);
 
-  // Trade cost: proportional to information content
-  // Moving μ costs more the further you go. Narrowing σ costs more (more information).
+  // Paradigm paper mechanism: trade cost proportional to movement + information
   const tradeCost = useMemo(() => {
     const muDelta = Math.abs(userMu - market.marketMu) / market.marketSigma;
     const sigmaRatio = market.marketSigma / userSigma;
     const baseCost = 100;
+    // Cost increases with mu movement and with narrowing sigma (more info = more expensive)
     return baseCost * (1 + muDelta * 0.5 + Math.abs(sigmaRatio - 1) * 0.3);
   }, [userMu, userSigma, market.marketMu, market.marketSigma]);
 
-  // Z-score based payout: rewards being "closer" in standard-deviation terms
-  const { payout, profit, zUser, zMarket, scoreRatio } = useMemo(() => {
+  // Paradigm payout: proportional to PDF ratio at outcome
+  // q(x*) / p(x*) where q = trader's dist, p = market consensus
+  const { payout, profit, traderPDF, marketPDF, pdfRatio, zUser, zMarket } = useMemo(() => {
+    const tPDF = normalPDF(resolutionValue, userMu, userSigma);
+    const mPDF = normalPDF(resolutionValue, market.marketMu, market.marketSigma);
     const zU = (resolutionValue - userMu) / userSigma;
     const zM = (resolutionValue - market.marketMu) / market.marketSigma;
 
-    // Gaussian kernel score: exp(-0.5 * z^2)
-    // Higher = closer to the mean in relative terms
-    const userScore = Math.exp(-0.5 * zU * zU);
-    const marketScore = Math.exp(-0.5 * zM * zM);
-
-    // Payout multiplier: how much better was your relative prediction?
-    const ratio = userScore / marketScore;
-
-    // Payout = cost * ratio (if ratio > 1, you profit; if < 1, you lose)
-    const p = tradeCost * ratio;
+    if (mPDF > 0) {
+      const ratio = tPDF / mPDF;
+      const p = tradeCost * ratio;
+      return {
+        payout: p,
+        profit: p - tradeCost,
+        traderPDF: tPDF,
+        marketPDF: mPDF,
+        pdfRatio: ratio,
+        zUser: zU,
+        zMarket: zM,
+      };
+    }
     return {
-      payout: p,
-      profit: p - tradeCost,
+      payout: 0,
+      profit: -tradeCost,
+      traderPDF: tPDF,
+      marketPDF: mPDF,
+      pdfRatio: 0,
       zUser: zU,
       zMarket: zM,
-      scoreRatio: ratio,
     };
   }, [resolutionValue, userMu, userSigma, market.marketMu, market.marketSigma, tradeCost]);
 
@@ -148,17 +163,52 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
               <div className="font-mono font-medium">${tradeCost.toFixed(2)}</div>
             </div>
             <div>
-              <span className="text-base-content/60">Your z-score:</span>
+              <span className="text-base-content/60">PDF Ratio:</span>
+              <div
+                className={`font-mono font-medium ${pdfRatio > 1 ? "text-success" : pdfRatio > 0 ? "text-error" : "text-base-content/50"}`}
+              >
+                {pdfRatio.toFixed(3)}x
+              </div>
+            </div>
+            <div>
+              <span className="text-base-content/60">Your PDF:</span>
+              <div className="font-mono font-medium">{traderPDF.toExponential(3)}</div>
+            </div>
+            <div>
+              <span className="text-base-content/60">Market PDF:</span>
+              <div className="font-mono font-medium">{marketPDF.toExponential(3)}</div>
+            </div>
+          </div>
+
+          {/* Z-scores with tooltip */}
+          <div className="grid grid-cols-2 gap-4 text-sm pt-2 border-t border-base-200">
+            <div className="group relative">
+              <span className="text-base-content/60 cursor-help border-b border-dotted border-base-content/40">
+                Your z-score:
+              </span>
               <div className="font-mono font-medium">{zUser.toFixed(3)}σ</div>
+              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block w-64 p-3 bg-base-300 rounded-lg text-xs shadow-lg z-10">
+                <strong>z-score = (outcome − your μ) / your σ</strong>
+                <br />
+                <br />
+                How many standard deviations the outcome is from your prediction. Lower absolute value = closer in
+                relative terms.
+                <br />
+                <br />
+                <em>Note:</em> Paradigm&apos;s payout uses raw PDF (not z-score). Wider distributions have lower peaks,
+                so even with a good z-score, your absolute PDF may be lower.
+              </div>
             </div>
-            <div>
-              <span className="text-base-content/60">Market z-score:</span>
+            <div className="group relative">
+              <span className="text-base-content/60 cursor-help border-b border-dotted border-base-content/40">
+                Market z-score:
+              </span>
               <div className="font-mono font-medium">{zMarket.toFixed(3)}σ</div>
-            </div>
-            <div>
-              <span className="text-base-content/60">Score ratio:</span>
-              <div className={`font-mono font-medium ${scoreRatio > 1 ? "text-success" : "text-error"}`}>
-                {scoreRatio.toFixed(3)}x
+              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block w-64 p-3 bg-base-300 rounded-lg text-xs shadow-lg z-10">
+                <strong>z-score = (outcome − market μ) / market σ</strong>
+                <br />
+                <br />
+                How many standard deviations the outcome is from the market consensus.
               </div>
             </div>
           </div>
@@ -178,9 +228,17 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
             </div>
           </div>
 
-          <p className="text-xs text-base-content/50 pt-2 border-t border-base-200">
-            Lower z-score = closer in relative terms. You profit when your z-score is lower than the market&apos;s.
-          </p>
+          <div className="pt-2 border-t border-base-200 text-xs text-base-content/60 space-y-1">
+            <p>
+              <strong>How Paradigm&apos;s mechanism works:</strong> Payout = Cost × (your PDF / market PDF). You profit
+              when your probability density at the outcome is higher than the market&apos;s.
+            </p>
+            <p>
+              <strong>Why wider σ can lose:</strong> A wider distribution spreads probability mass thinner. Even if
+              you&apos;re close in z-score terms, your absolute PDF at the outcome may be lower than the market&apos;s
+              narrower peak.
+            </p>
+          </div>
         </div>
 
         <button className="btn btn-primary w-full mt-6">Submit Trade</button>
