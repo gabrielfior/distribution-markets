@@ -24,22 +24,19 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
   const [userSigma, setUserSigma] = useState(market.marketSigma);
   const [resolutionValue, setResolutionValue] = useState(market.marketMu);
 
-  // Paradigm paper mechanism: trade cost proportional to movement + information
+  // Trade cost proportional to movement + information
   const tradeCost = useMemo(() => {
     const muDelta = Math.abs(userMu - market.marketMu) / market.marketSigma;
     const sigmaRatio = market.marketSigma / userSigma;
     const baseCost = 100;
-    // Cost increases with mu movement and with narrowing sigma (more info = more expensive)
     return baseCost * (1 + muDelta * 0.5 + Math.abs(sigmaRatio - 1) * 0.3);
   }, [userMu, userSigma, market.marketMu, market.marketSigma]);
 
-  // Paradigm payout: proportional to PDF ratio at outcome
+  // Payout proportional to PDF ratio at outcome
   // q(x*) / p(x*) where q = trader's dist, p = market consensus
-  const { payout, profit, traderPDF, marketPDF, pdfRatio, zUser, zMarket } = useMemo(() => {
+  const { payout, profit, traderPDF, marketPDF, pdfRatio } = useMemo(() => {
     const tPDF = normalPDF(resolutionValue, userMu, userSigma);
     const mPDF = normalPDF(resolutionValue, market.marketMu, market.marketSigma);
-    const zU = (resolutionValue - userMu) / userSigma;
-    const zM = (resolutionValue - market.marketMu) / market.marketSigma;
 
     if (mPDF > 0) {
       const ratio = tPDF / mPDF;
@@ -50,8 +47,6 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
         traderPDF: tPDF,
         marketPDF: mPDF,
         pdfRatio: ratio,
-        zUser: zU,
-        zMarket: zM,
       };
     }
     return {
@@ -60,8 +55,6 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
       traderPDF: tPDF,
       marketPDF: mPDF,
       pdfRatio: 0,
-      zUser: zU,
-      zMarket: zM,
     };
   }, [resolutionValue, userMu, userSigma, market.marketMu, market.marketSigma, tradeCost]);
 
@@ -180,39 +173,6 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
             </div>
           </div>
 
-          {/* Z-scores with tooltip */}
-          <div className="grid grid-cols-2 gap-4 text-sm pt-2 border-t border-base-200">
-            <div className="group relative">
-              <span className="text-base-content/60 cursor-help border-b border-dotted border-base-content/40">
-                Your z-score:
-              </span>
-              <div className="font-mono font-medium">{zUser.toFixed(3)}σ</div>
-              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block w-64 p-3 bg-base-300 rounded-lg text-xs shadow-lg z-10">
-                <strong>z-score = (outcome − your μ) / your σ</strong>
-                <br />
-                <br />
-                How many standard deviations the outcome is from your prediction. Lower absolute value = closer in
-                relative terms.
-                <br />
-                <br />
-                <em>Note:</em> Paradigm&apos;s payout uses raw PDF (not z-score). Wider distributions have lower peaks,
-                so even with a good z-score, your absolute PDF may be lower.
-              </div>
-            </div>
-            <div className="group relative">
-              <span className="text-base-content/60 cursor-help border-b border-dotted border-base-content/40">
-                Market z-score:
-              </span>
-              <div className="font-mono font-medium">{zMarket.toFixed(3)}σ</div>
-              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block w-64 p-3 bg-base-300 rounded-lg text-xs shadow-lg z-10">
-                <strong>z-score = (outcome − market μ) / market σ</strong>
-                <br />
-                <br />
-                How many standard deviations the outcome is from the market consensus.
-              </div>
-            </div>
-          </div>
-
           <div className="pt-3 border-t border-base-300">
             <div className="flex justify-between items-center mb-1">
               <span className="text-base-content/60">Payout:</span>
@@ -228,15 +188,31 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
             </div>
           </div>
 
-          <div className="pt-2 border-t border-base-200 text-xs text-base-content/60 space-y-1">
+          <div className="pt-2 border-t border-base-200 text-xs text-base-content/60 space-y-2">
             <p>
-              <strong>How Paradigm&apos;s mechanism works:</strong> Payout = Cost × (your PDF / market PDF). You profit
-              when your probability density at the outcome is higher than the market&apos;s.
+              <strong>How the payout works:</strong> Payout = Cost × (your PDF / market PDF). You profit when your
+              probability density at the outcome is higher than the market&apos;s.
             </p>
             <p>
-              <strong>Why wider σ can lose:</strong> A wider distribution spreads probability mass thinner. Even if
-              you&apos;re close in z-score terms, your absolute PDF at the outcome may be lower than the market&apos;s
+              <strong>What is PDF?</strong> Probability Density Function — the height of the bell curve at a specific
+              point. Higher = more probability mass concentrated there. Narrow distributions have taller peaks; wide
+              distributions have flatter peaks.
+            </p>
+            <p>
+              <strong>Why wider σ can lose:</strong> A wider distribution spreads probability mass thinner. Even if the
+              outcome is close to your mean, your absolute PDF at that point may be lower than the market&apos;s
               narrower peak.
+            </p>
+            <p className="text-base-content/40">
+              Reference: Distribution Markets (2024) —{" "}
+              <a
+                href="https://www.paradigm.xyz/2024/12/distribution-markets"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-primary"
+              >
+                paradigm.xyz/2024/12/distribution-markets
+              </a>
             </p>
           </div>
         </div>
