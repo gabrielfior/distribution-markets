@@ -12,37 +12,42 @@ interface TradingInterfaceProps {
   };
 }
 
-function normalPDF(x: number, mu: number, sigma: number): number {
-  if (sigma <= 0) return 0;
-  const coeff = 1 / (sigma * Math.sqrt(2 * Math.PI));
-  const exponent = -0.5 * Math.pow((x - mu) / sigma, 2);
-  return coeff * Math.exp(exponent);
-}
-
 export default function TradingInterface({ market }: TradingInterfaceProps) {
   const [userMu, setUserMu] = useState(market.marketMu);
   const [userSigma, setUserSigma] = useState(market.marketSigma);
   const [resolutionValue, setResolutionValue] = useState(market.marketMu);
 
-  // Hypothetical trade cost: proportional to how far you move μ and how narrow your σ
+  // Trade cost: proportional to information content
+  // Moving μ costs more the further you go. Narrowing σ costs more (more information).
   const tradeCost = useMemo(() => {
     const muDelta = Math.abs(userMu - market.marketMu) / market.marketSigma;
     const sigmaRatio = market.marketSigma / userSigma;
     const baseCost = 100;
-    return baseCost * (1 + muDelta * 0.5 + (sigmaRatio - 1) * 0.1);
+    return baseCost * (1 + muDelta * 0.5 + Math.abs(sigmaRatio - 1) * 0.3);
   }, [userMu, userSigma, market.marketMu, market.marketSigma]);
 
-  // Payout calculation based on contract logic
-  const { payout, profit, traderPDF, marketPDF } = useMemo(() => {
-    const tPDF = normalPDF(resolutionValue, userMu, userSigma);
-    const mPDF = normalPDF(resolutionValue, market.marketMu, market.marketSigma);
+  // Z-score based payout: rewards being "closer" in standard-deviation terms
+  const { payout, profit, zUser, zMarket, scoreRatio } = useMemo(() => {
+    const zU = (resolutionValue - userMu) / userSigma;
+    const zM = (resolutionValue - market.marketMu) / market.marketSigma;
 
-    if (tPDF > mPDF && mPDF > 0) {
-      const ratio = tPDF / mPDF;
-      const p = tradeCost * ratio;
-      return { payout: p, profit: p - tradeCost, traderPDF: tPDF, marketPDF: mPDF };
-    }
-    return { payout: 0, profit: -tradeCost, traderPDF: tPDF, marketPDF: mPDF };
+    // Gaussian kernel score: exp(-0.5 * z^2)
+    // Higher = closer to the mean in relative terms
+    const userScore = Math.exp(-0.5 * zU * zU);
+    const marketScore = Math.exp(-0.5 * zM * zM);
+
+    // Payout multiplier: how much better was your relative prediction?
+    const ratio = userScore / marketScore;
+
+    // Payout = cost * ratio (if ratio > 1, you profit; if < 1, you lose)
+    const p = tradeCost * ratio;
+    return {
+      payout: p,
+      profit: p - tradeCost,
+      zUser: zU,
+      zMarket: zM,
+      scoreRatio: ratio,
+    };
   }, [resolutionValue, userMu, userSigma, market.marketMu, market.marketSigma, tradeCost]);
 
   const maxRange = Math.round(market.marketMu + 3 * market.marketSigma);
@@ -143,29 +148,39 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
               <div className="font-mono font-medium">${tradeCost.toFixed(2)}</div>
             </div>
             <div>
-              <span className="text-base-content/60">Your PDF at outcome:</span>
-              <div className="font-mono font-medium">{traderPDF.toExponential(3)}</div>
+              <span className="text-base-content/60">Your z-score:</span>
+              <div className="font-mono font-medium">{zUser.toFixed(3)}σ</div>
             </div>
             <div>
-              <span className="text-base-content/60">Market PDF at outcome:</span>
-              <div className="font-mono font-medium">{marketPDF.toExponential(3)}</div>
+              <span className="text-base-content/60">Market z-score:</span>
+              <div className="font-mono font-medium">{zMarket.toFixed(3)}σ</div>
             </div>
             <div>
-              <span className="text-base-content/60">Payout:</span>
-              <div className={`font-mono font-bold ${payout > 0 ? "text-success" : "text-base-content/50"}`}>
-                ${payout.toFixed(2)}
+              <span className="text-base-content/60">Score ratio:</span>
+              <div className={`font-mono font-medium ${scoreRatio > 1 ? "text-success" : "text-error"}`}>
+                {scoreRatio.toFixed(3)}x
               </div>
             </div>
           </div>
 
-          <div className="pt-3 border-t border-base-300 flex justify-between items-center">
-            <span className="font-semibold">Net Profit/Loss:</span>
-            <span
-              className={`font-mono font-bold text-lg ${profit > 0 ? "text-success" : profit < 0 ? "text-error" : ""}`}
-            >
-              {profit > 0 ? "+" : ""}${profit.toFixed(2)}
-            </span>
+          <div className="pt-3 border-t border-base-300">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-base-content/60">Payout:</span>
+              <span className="font-mono font-bold">${payout.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="font-semibold">Net Profit/Loss:</span>
+              <span
+                className={`font-mono font-bold text-lg ${profit > 0 ? "text-success" : profit < 0 ? "text-error" : ""}`}
+              >
+                {profit > 0 ? "+" : ""}${profit.toFixed(2)}
+              </span>
+            </div>
           </div>
+
+          <p className="text-xs text-base-content/50 pt-2 border-t border-base-200">
+            Lower z-score = closer in relative terms. You profit when your z-score is lower than the market&apos;s.
+          </p>
         </div>
 
         <button className="btn btn-primary w-full mt-6">Submit Trade</button>
