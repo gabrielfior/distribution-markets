@@ -16,26 +16,14 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
   const [userMu, setUserMu] = useState(market.marketMu);
   const [userSigma, setUserSigma] = useState(market.marketSigma);
 
-  const generateNormalPoints = (mu: number, sigma: number) => {
-    const points = [];
-    const step = sigma / 20;
-    for (let x = mu - 3.5 * sigma; x <= mu + 3.5 * sigma; x += step) {
-      const y = (1 / (sigma * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * Math.pow((x - mu) / sigma, 2));
-      points.push({ x, y });
-    }
-    return points;
-  };
-
-  const marketDist = generateNormalPoints(market.marketMu, market.marketSigma);
-  const userDist = generateNormalPoints(userMu, userSigma);
-
   return (
     <div className="space-y-6">
       <DistributionCurve
-        marketDistribution={marketDist}
-        userDistribution={userDist}
+        marketMu={market.marketMu}
+        marketSigma={market.marketSigma}
+        userMu={userMu}
+        userSigma={userSigma}
         height={300}
-        key={`${userMu}-${userSigma}`}
       />
 
       <div className="bg-base-200 p-6 rounded-lg">
@@ -53,6 +41,7 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
               min={Math.round(market.marketMu - 3 * market.marketSigma)}
               max={Math.round(market.marketMu + 3 * market.marketSigma)}
               value={userMu}
+              step={1}
               onChange={e => setUserMu(Number(e.target.value))}
               className="range range-primary w-full"
             />
@@ -73,6 +62,7 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
               min={Math.round(market.marketSigma * 0.2)}
               max={Math.round(market.marketSigma * 3)}
               value={userSigma}
+              step={1}
               onChange={e => setUserSigma(Number(e.target.value))}
               className="range range-secondary w-full"
             />

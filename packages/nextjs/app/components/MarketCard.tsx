@@ -13,16 +13,6 @@ interface Market {
 }
 
 export default function MarketCard({ market }: { market: Market }) {
-  const generateNormalPoints = (mu: number, sigma: number) => {
-    const points = [];
-    const step = sigma / 20;
-    for (let x = mu - 3.5 * sigma; x <= mu + 3.5 * sigma; x += step) {
-      const y = (1 / (sigma * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * Math.pow((x - mu) / sigma, 2));
-      points.push({ x, y });
-    }
-    return points;
-  };
-
   return (
     <div className="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow">
       <div className="card-body">
@@ -36,7 +26,8 @@ export default function MarketCard({ market }: { market: Market }) {
             </span>
           </div>
           <DistributionCurve
-            marketDistribution={generateNormalPoints(market.marketMu, market.marketSigma)}
+            marketMu={market.marketMu}
+            marketSigma={market.marketSigma}
             actualPrice={market.currentPrice}
             height={180}
           />

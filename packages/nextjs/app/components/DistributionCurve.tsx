@@ -1,30 +1,61 @@
 "use client";
 
+import { useMemo } from "react";
 import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-interface DistributionPoint {
-  x: number;
-  y: number;
-}
-
 interface DistributionCurveProps {
-  marketDistribution: DistributionPoint[];
-  userDistribution?: DistributionPoint[];
+  marketMu: number;
+  marketSigma: number;
+  userMu?: number;
+  userSigma?: number;
   actualPrice?: number;
   height?: number;
 }
 
+function normalPDF(x: number, mu: number, sigma: number): number {
+  if (sigma <= 0) return 0;
+  const coeff = 1 / (sigma * Math.sqrt(2 * Math.PI));
+  const exponent = -0.5 * Math.pow((x - mu) / sigma, 2);
+  return coeff * Math.exp(exponent);
+}
+
 export default function DistributionCurve({
-  marketDistribution,
-  userDistribution,
+  marketMu,
+  marketSigma,
+  userMu,
+  userSigma,
   actualPrice,
   height = 250,
 }: DistributionCurveProps) {
-  const data = marketDistribution.map((p, i) => ({
-    x: Math.round(p.x),
-    market: p.y,
-    user: userDistribution?.[i]?.y ?? 0,
-  }));
+  const data = useMemo(() => {
+    // Determine the unified x range
+    const allMus = [marketMu];
+    const allSigmas = [marketSigma];
+    if (userMu !== undefined && userSigma !== undefined) {
+      allMus.push(userMu);
+      allSigmas.push(userSigma);
+    }
+
+    const minMu = Math.min(...allMus);
+    const maxMu = Math.max(...allMus);
+    const maxSigma = Math.max(...allSigmas);
+
+    const xMin = minMu - 3.5 * maxSigma;
+    const xMax = maxMu + 3.5 * maxSigma;
+    const step = (xMax - xMin) / 200;
+
+    const points = [];
+    for (let x = xMin; x <= xMax; x += step) {
+      points.push({
+        x: Math.round(x),
+        market: normalPDF(x, marketMu, marketSigma),
+        user: userMu !== undefined && userSigma !== undefined ? normalPDF(x, userMu, userSigma) : 0,
+      });
+    }
+    return points;
+  }, [marketMu, marketSigma, userMu, userSigma]);
+
+  const hasUserDist = userMu !== undefined && userSigma !== undefined;
 
   return (
     <div className="w-full bg-base-200 rounded-lg p-4" style={{ height }}>
@@ -51,7 +82,7 @@ export default function DistributionCurve({
             name="Market consensus"
             isAnimationActive={false}
           />
-          {userDistribution && userDistribution.length > 0 && (
+          {hasUserDist && (
             <Line
               type="monotone"
               dataKey="user"
