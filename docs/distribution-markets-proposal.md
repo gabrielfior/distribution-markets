@@ -33,8 +33,11 @@ Current prediction markets like Polymarket overwhelmingly use **discrete bucket 
 **"What price will Bitcoin hit April 20-26?"** ([Polymarket](https://polymarket.com/event/what-price-will-bitcoin-hit-april-20-26))
 
 - 14 separate binary markets, each with a strike price (`↑ $88k`, `↑ $86k`, `↓ $72k`, etc.)
-- Multiple outcomes can resolve YES simultaneously (if BTC hits $82k, then $80k, $78k, etc. also resolve YES)
+- **The outcomes are cumulative:** if BTC hits $90k, it has necessarily hit $88k, $86k, $84k, etc. All lower strikes resolve YES simultaneously.
+- Traders are not betting on "where the price lands" — they are betting on "whether the price path touches a level"
 - **$555,663 in volume split across 14 pools**
+
+*See Appendix A for why touch binaries estimate a fundamentally different object than a price distribution.*
 
 ### Why This Is Suboptimal
 
@@ -269,4 +272,62 @@ We are building in public at [github.com/distribution-market-agent](https://gith
 
 ---
 
-*Thank you for reviewing this proposal. We welcome all feedback, corrections, and suggestions. Please open an issue or reach out directly.*
+## Appendix A: What Touch Binaries Actually Estimate
+
+Touch binary markets like Polymarket's "What price will Bitcoin hit April 20-26?" are structurally different from single-point price markets. Understanding this difference is crucial for designing better alternatives.
+
+### The Cumulative Structure
+
+Consider the upside strikes: `↑ $88k`, `↑ $86k`, `↑ $84k`, `↑ $82k`, `↑ $80k`.
+
+If BTC hits $90k during the week, then **all five of these markets resolve YES simultaneously**. The outcomes are not mutually exclusive buckets — they are **nested thresholds**:
+
+```
+Hit $90k  →  Hit $88k  →  Hit $86k  →  Hit $84k  →  ...
+    YES         YES         YES         YES
+```
+
+This means the 14 binary markets are not 14 independent bets. They are 14 samples from a single underlying object: **the probability that the price path reaches or exceeds each strike level**.
+
+### What Traders Are Really Expressing
+
+When a trader buys YES on `↑ $88k` at 5¢, they are saying: "I believe there is more than a 5% chance BTC touches $88k." But this belief is not independent of their belief about `↑ $86k`. The two are linked by the same underlying price process.
+
+What the market as a whole is estimating is a **cumulative touch probability curve** (also called a hazard function or survival function):
+
+```
+T(K) = P(BTC price touches K or higher during the window)
+```
+
+For any strike K, `T(K)` is monotonically decreasing as K increases. At K = $0, T(K) = 1 (BTC has certainly touched $0 at some point in its history). At K = $1,000,000, T(K) ≈ 0.
+
+### Why This Is Not a Normal Distribution
+
+A single-point bucket market (Example A) asks: "Where will the price land at one specific time?" This is naturally modeled by a probability distribution — traders estimate a density function over price levels.
+
+A touch binary market asks: "What is the highest level the price will reach?" This is a question about the **maximum of a stochastic process over a time window**. The relevant object is:
+
+- The **distribution of the maximum price**, or equivalently
+- The **cumulative touch probability** as a function of strike
+
+These are related to the path properties of the underlying asset (realized volatility, trend, jump risk), not just the terminal price.
+
+### The Information Loss of Discrete Touch Binaries
+
+By splitting the cumulative curve into 14 separate binary pools, Polymarket loses information:
+
+1. **Liquidity fragmentation:** A trader who believes "BTC will hit $82k but not $88k" must trade in two separate pools. They cannot express a unified view.
+2. **No confidence signal:** A trader cannot say "I'm 90% sure BTC hits $80k but only 10% sure it hits $88k." Each binary is just a point estimate.
+3. **Path information discarded:** The market reveals nothing about *when* or *how* BTC hit a level — only that it did.
+
+### What a Distribution Market Alternative Looks Like
+
+A Distribution Market over the **maximum price** during the window naturally encodes the same information as the entire grid of touch binaries:
+
+```
+P(max ≥ K) = 1 - CDF_market(K)
+```
+
+From a single distribution over the maximum, you can read off the touch probability at any strike. One continuous market replaces 14 binary pools, with no liquidity fragmentation and full confidence signaling via σ.
+
+*Note: For path-dependent events (touch binaries), the correct distributional object is the distribution of the running maximum or a cumulative hazard curve, not a Normal distribution over the terminal price. Our MVP focuses on single-point price markets first, where a Normal distribution is appropriate.*
