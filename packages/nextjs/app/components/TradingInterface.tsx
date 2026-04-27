@@ -19,19 +19,6 @@ function normalPDF(x: number, mu: number, sigma: number): number {
   return coeff * Math.exp(exponent);
 }
 
-/**
- * Scalar market payout using CPMM (Constant Product Market Maker)
- * For a scalar market with bounds [low, high]:
- * - If outcome <= low: payout = 0
- * - If outcome >= high: payout = 1
- * - If low < outcome < high: payout = (outcome - low) / (high - low)
- */
-function scalarMarketPayout(outcome: number, low: number, high: number): number {
-  if (outcome <= low) return 0;
-  if (outcome >= high) return 1;
-  return (outcome - low) / (high - low);
-}
-
 export default function TradingInterface({ market }: TradingInterfaceProps) {
   const [userMu, setUserMu] = useState(market.marketMu);
   const [userSigma, setUserSigma] = useState(market.marketSigma);
@@ -70,20 +57,6 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
       pdfRatio: 0,
     };
   }, [resolutionValue, userMu, userSigma, market.marketMu, market.marketSigma, tradeCost]);
-
-  // Scalar market comparison: bounds at ±10% of marketMu
-  const scalarLow = market.marketMu * 0.9;
-  const scalarHigh = market.marketMu * 1.1;
-  const { scalarPayout, scalarProfit } = useMemo(() => {
-    const payoutFraction = scalarMarketPayout(resolutionValue, scalarLow, scalarHigh);
-    // CPMM at midpoint: buying Long at 0.5 gives 2x notional exposure
-    const notionalMultiplier = 2;
-    const totalPayout = tradeCost * notionalMultiplier * payoutFraction;
-    return {
-      scalarPayout: totalPayout,
-      scalarProfit: totalPayout - tradeCost,
-    };
-  }, [resolutionValue, scalarLow, scalarHigh, tradeCost]);
 
   const maxRange = Math.round(market.marketMu + 3 * market.marketSigma);
   const minRange = Math.round(market.marketMu - 3 * market.marketSigma);
@@ -212,61 +185,6 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
               >
                 {profit > 0 ? "+" : ""}${profit.toFixed(2)}
               </span>
-            </div>
-          </div>
-
-          {/* Scalar Market Comparison */}
-          <div className="pt-4 border-t border-base-200">
-            <h5 className="font-semibold text-sm mb-2 text-base-content/80">Scalar Market Comparison (CPMM)</h5>
-            <p className="text-xs text-base-content/50 mb-3">
-              Same ${tradeCost.toFixed(2)} investment in a scalar market with bounds{" "}
-              <strong>
-                ${Math.round(scalarLow).toLocaleString()} – ${Math.round(scalarHigh).toLocaleString()}
-              </strong>
-            </p>
-
-            <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-              <div>
-                <span className="text-base-content/60">Scalar payout:</span>
-                <div className="font-mono font-bold">${scalarPayout.toFixed(2)}</div>
-              </div>
-              <div>
-                <span className="text-base-content/60">Net Profit/Loss:</span>
-                <div
-                  className={`font-mono font-bold ${scalarProfit > 0 ? "text-success" : scalarProfit < 0 ? "text-error" : ""}`}
-                >
-                  {scalarProfit > 0 ? "+" : ""}${scalarProfit.toFixed(2)}
-                </div>
-              </div>
-            </div>
-
-            {/* Side-by-side comparison */}
-            <div className="mt-3 p-3 bg-base-200 rounded-lg">
-              <div className="text-xs font-semibold text-base-content/70 mb-2">Comparison</div>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div className="text-base-content/50">Market Type</div>
-                <div className="text-base-content/50">Payout</div>
-                <div className="text-base-content/50">Profit/Loss</div>
-
-                <div className="font-medium">Distribution</div>
-                <div className="font-mono">${payout.toFixed(2)}</div>
-                <div className={`font-mono font-bold ${profit > 0 ? "text-success" : "text-error"}`}>
-                  {profit > 0 ? "+" : ""}${profit.toFixed(2)}
-                </div>
-
-                <div className="font-medium">Scalar</div>
-                <div className="font-mono">${scalarPayout.toFixed(2)}</div>
-                <div className={`font-mono font-bold ${scalarProfit > 0 ? "text-success" : "text-error"}`}>
-                  {scalarProfit > 0 ? "+" : ""}${scalarProfit.toFixed(2)}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3 p-2 bg-base-200 rounded text-xs text-base-content/60">
-              <strong>How scalar markets work:</strong> You buy Long tokens at the current market price (~50¢). Each
-              Long token pays out linearly between ${Math.round(scalarLow).toLocaleString()} (0¢) and ${" "}
-              {Math.round(scalarHigh).toLocaleString()} ($1). Your profit depends only on where the outcome lands within
-              the fixed bounds — not on how confident you were.
             </div>
           </div>
 
