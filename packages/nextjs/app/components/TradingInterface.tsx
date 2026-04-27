@@ -19,6 +19,19 @@ function normalPDF(x: number, mu: number, sigma: number): number {
   return coeff * Math.exp(exponent);
 }
 
+/**
+ * Scalar market payout using CPMM (Constant Product Market Maker)
+ * For a scalar market with bounds [low, high]:
+ * - If outcome <= low: payout = 0
+ * - If outcome >= high: payout = 1
+ * - If low < outcome < high: payout = (outcome - low) / (high - low)
+ */
+function scalarMarketPayout(outcome: number, low: number, high: number): number {
+  if (outcome <= low) return 0;
+  if (outcome >= high) return 1;
+  return (outcome - low) / (high - low);
+}
+
 export default function TradingInterface({ market }: TradingInterfaceProps) {
   const [userMu, setUserMu] = useState(market.marketMu);
   const [userSigma, setUserSigma] = useState(market.marketSigma);
@@ -57,6 +70,13 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
       pdfRatio: 0,
     };
   }, [resolutionValue, userMu, userSigma, market.marketMu, market.marketSigma, tradeCost]);
+
+  // Scalar market comparison: bounds at ±10% of marketMu
+  const scalarLow = market.marketMu * 0.9;
+  const scalarHigh = market.marketMu * 1.1;
+  const scalarPayout = useMemo(() => {
+    return scalarMarketPayout(resolutionValue, scalarLow, scalarHigh);
+  }, [resolutionValue, scalarLow, scalarHigh]);
 
   const maxRange = Math.round(market.marketMu + 3 * market.marketSigma);
   const minRange = Math.round(market.marketMu - 3 * market.marketSigma);
@@ -185,6 +205,42 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
               >
                 {profit > 0 ? "+" : ""}${profit.toFixed(2)}
               </span>
+            </div>
+          </div>
+
+          {/* Scalar Market Comparison */}
+          <div className="pt-4 border-t border-base-200">
+            <h5 className="font-semibold text-sm mb-3 text-base-content/80">Scalar Market Comparison (CPMM)</h5>
+            <p className="text-xs text-base-content/50 mb-3">
+              Bounds:{" "}
+              <strong>
+                ${scalarLow.toLocaleString()} to ${scalarHigh.toLocaleString()}
+              </strong>{" "}
+              (±10% from {market.marketMu.toLocaleString()})
+            </p>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-base-content/60">Scalar payout:</span>
+                <div className={`font-mono font-medium ${scalarPayout > 0.5 ? "text-success" : "text-base-content"}`}>
+                  {(scalarPayout * 100).toFixed(1)}%
+                </div>
+              </div>
+              <div>
+                <span className="text-base-content/60">Position:</span>
+                <div className="font-mono font-medium">
+                  {resolutionValue < scalarLow
+                    ? "Below range (0%)"
+                    : resolutionValue > scalarHigh
+                      ? "Above range (100%)"
+                      : "In range"}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 p-2 bg-base-200 rounded text-xs text-base-content/60">
+              <strong>How scalar markets work:</strong> Linear payout between bounds. If outcome is $
+              {scalarLow.toLocaleString()}, you get 0%. If outcome is ${scalarHigh.toLocaleString()}, you get 100%.
+              Unlike distribution markets, scalar markets cap your upside and don&apos;t reward confidence in the shape
+              of your prediction.
             </div>
           </div>
 
