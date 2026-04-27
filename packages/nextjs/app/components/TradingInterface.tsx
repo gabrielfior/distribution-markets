@@ -34,7 +34,6 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
   // Constants matching the smart contract plan
   const MIN_BACKING = 0.001; // ETH (~$1-2)
   const BASE_FEE_BPS = 100; // 1%
-  const L2_MULTIPLIER = 10;
   const REFERENCE_SIGMA = 400;
 
   // Compute L2 norm and minimum collateral
@@ -44,10 +43,13 @@ export default function TradingInterface({ market }: TradingInterfaceProps) {
   }, [l2]);
 
   // Fee breakdown
+  // Using corrected L2 scaling: the raw plan formula produces fees >100% of collateral.
+  // We scale by 0.01 to match the plan's example table (1% at σ=400, ~6% at σ=10).
   const { baseFee, l2Fee, totalFee, netCollateral } = useMemo(() => {
     const base = (collateral * BASE_FEE_BPS) / 10000;
     const referenceL2 = l2Norm(REFERENCE_SIGMA);
-    const l2FeeAmount = (collateral * l2 * L2_MULTIPLIER) / referenceL2;
+    const l2Ratio = referenceL2 > 0 ? l2 / referenceL2 : 1;
+    const l2FeeAmount = collateral * l2Ratio * 0.01; // 1% base × L2 ratio
     const total = base + l2FeeAmount;
     const net = Math.max(0, collateral - total);
     return {
