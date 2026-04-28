@@ -200,6 +200,8 @@ No arbitrary bucket boundaries. No "if exactly on boundary, round up" rules. The
    - Loops through all traders
    - Computes `f_i(x*)` for each
    - Calculates and caches `f_m(x*) = weighted average`
+   
+   *Scaling:* The O(N) loop is a one-time gas cost paid by the resolver. For large markets, we can move computation off-chain and verify via a **Merkle proof**: the resolver submits a Merkle root of all `(trader, f_i(x*))` pairs, and traders claim by providing a Merkle path proving their individual density value. This keeps resolution gas constant regardless of participant count.
 4. **Claim** (traders): Each trader calls claim. The contract:
    - Computes `payout = collateral × f_i(x*) / f_m(x*)`
    - Sends ETH to trader
@@ -234,7 +236,7 @@ Our implementation makes two practical simplifications for an on-chain MVP:
 | Paradigm Paper | Our Implementation | Rationale |
 |----------------|-------------------|-----------|
 | Non-parametric functions (arbitrary PDFs) | Parametric Normal distributions | Gas-efficiency. O(1) storage per trader. |
-| Continuous function-space AMM | Capital-weighted PDF average at resolution | O(N) resolution loop is a one-time cost. Trade gas stays cheap. |
+| Continuous function-space AMM | Capital-weighted PDF average at resolution | O(N) resolution loop is a one-time cost. Trade gas stays cheap. Merkle proofs can scale this off-chain. |
 | Full L2 ball invariant | L2 norm used for fee scaling + minimum collateral | Maintains anti-manipulation without complex on-chain integration. |
 
 We view our design as a **practical first step** toward the full vision Paradigm described. As ZK proving and on-chain computation improve, we intend to move closer to the non-parametric, continuous-function ideal.
@@ -373,3 +375,21 @@ A practical challenge for any new prediction market primitive is **cold-start li
 - **Cross-market arbitrage:** If a Distribution Market and a Polymarket bucket market coexist for the same event, arbitrageurs could trade discrepancies between the continuous CDF and discrete bucket prices, which naturally channels liquidity toward the more efficient market.
 
 The core question is whether **imported liquidity** compromises the incentive alignment of the scoring rule. If the initial market maker is not a genuine belief holder but an algorithmic translation of external prices, does that distort payouts or create exploitable edge cases? This is an open design question for future research.
+
+---
+
+## 10. Next Steps
+
+| Phase | Deliverable | Timeline | Status |
+|---|---|---|---|
+| **1. Simulation** | Agent-based trader simulation (§9B); validate scoring rule, fee calibration, and manipulation resistance | 2–3 weeks | Not started |
+| **2. Smart Contract** | Foundry implementation with PRB-Math; O(N) resolution + Merkle proof variant | 3–4 weeks | Not started |
+| **3. Testnet** | Deploy to Gnosis Chiado; run internal market with simulated traders | 2 weeks | Not started |
+| **4. Frontend** | React + wagmi UI showing consensus curve, trader positions, and claim flow | 3–4 weeks | Partial (mock data) |
+| **5. Audit Prep** | Freeze contract; document invariants; engage audit firm | 2 weeks | Not started |
+| **6. Mainnet Pilot** | Single market (ETH spot price) on Gnosis Chain with capped collateral | 1 week | Not started |
+
+**Immediate priorities:**
+1. Build the trader simulation framework to generate concrete payout examples and stress-test the L2 fee schedule
+2. Implement the core Solidity contract with both O(N) resolution and Merkle-proof resolution paths
+3. Draft the oracle specification (single-exchange vs. multi-exchange TWAP) for testnet markets
