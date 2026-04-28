@@ -88,7 +88,7 @@ Our work is heavily inspired by Paradigm's [*Distribution Markets*](https://www.
 | Continuous function-space AMM | Capital-weighted average at resolution + Merkle proofs |
 | Full L2 ball invariant | L2 norm used for fee scaling + minimum collateral |
 
-We view this as a **practical first step** toward the full vision. As ZK proving and on-chain computation improve, we intend to move closer to non-parametric, continuous-function markets.
+We view this as a **practical first step** toward the full vision to move closer to non-parametric, continuous-function markets.
 
 ---
 
