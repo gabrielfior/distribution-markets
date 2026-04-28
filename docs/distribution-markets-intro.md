@@ -88,7 +88,28 @@ Our work is heavily inspired by Paradigm's [*Distribution Markets*](https://www.
 | Continuous function-space AMM | Capital-weighted average at resolution + Merkle proofs |
 | Full L2 ball invariant | L2 norm used for fee scaling + minimum collateral |
 
-We view this as a **practical first step** toward the full vision to move closer to non-parametric, continuous-function markets.
+### Paradigm's Continuous AMM vs. Our Resolution-Time Average
+
+The biggest architectural difference is **when and how the consensus updates**.
+
+**Paradigm's approach: A continuous function-space AMM.**
+Imagine a Uniswap-style AMM, but instead of trading tokens, you trade *functions*. The market maintains an invariant — a "ball" in L2 function space — and every trade moves the market distribution along a geodesic. The consensus updates **continuously** with each trade. If you think the market is wrong, you trade against it immediately, shifting the consensus in real time. This is elegant, instantaneous, and theoretically beautiful. It is also extraordinarily complex to implement on-chain: you need to enforce geometric invariants over infinite-dimensional function spaces, and every trade recomputes integrals over the entire outcome space.
+
+**Our approach: A capital-weighted average at resolution.**
+Traders submit distributions and collateral. Nothing changes until the oracle resolves the market. At that single moment, the contract computes the weighted average of all PDFs, evaluates each trader's density at the realized outcome, and pays out. There is **no continuous price discovery** — you cannot "trade against the market" mid-event and immediately profit from shifting the consensus. You simply stake your view and wait.
+
+| Dimension | Paradigm AMM | Our Resolution Average |
+|---|---|---|
+| **Price discovery** | Continuous; market updates per trade | Discrete; one consensus at resolution |
+| **Trading experience** | Like a DEX: immediate feedback, continuous liquidity | Like a vault: submit view, wait for outcome |
+| **On-chain complexity** | Very high (function-space invariants, geometric updates) | Low (store μ, σ, collateral; compute average once) |
+| **Gas per trade** | High (recompute integrals, enforce invariant) | Low (~50k gas; just store parameters) |
+| **MEV / front-running** | Significant (continuous state changes) | Minimal (no mid-market trading after submission) |
+| **Capital efficiency** | Capital rotates continuously | Capital locked until resolution |
+
+**Why we chose this tradeoff:** Our MVP prioritizes **shipability**. A resolution-time average preserves the core mechanism (proper scoring, solvency guarantee, information aggregation) while reducing on-chain complexity by 10×. The gas savings make it feasible on L2s like Gnosis today. And critically, it gives us a working foundation to iterate toward Paradigm's continuous ideal as ZK proving and on-chain computation mature. The continuous AMM is the destination; the resolution-time average is the on-ramp.
+
+We view this as a **practical first step** toward the full vision. As ZK proving and on-chain computation improve, we intend to move closer to non-parametric, continuous-function markets.
 
 ---
 

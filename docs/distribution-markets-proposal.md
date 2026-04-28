@@ -242,7 +242,7 @@ Our implementation makes two practical simplifications for an on-chain MVP:
 | Continuous function-space AMM | Capital-weighted PDF average at resolution | O(N) resolution loop is a one-time cost. Trade gas stays cheap. Merkle proofs can scale this off-chain. |
 | Full L2 ball invariant | L2 norm used for fee scaling + minimum collateral | Maintains anti-manipulation without complex on-chain integration. |
 
-We view our design as a **practical first step** toward the full vision Paradigm described. As ZK proving and on-chain computation improve, we intend to move closer to the non-parametric, continuous-function ideal.
+We view our design as a **practical first step** toward the full vision Paradigm described. The continuous function-space AMM is the theoretical ideal — continuous price discovery, immediate feedback, capital-efficient rotation. Our resolution-time average is the on-ramp: it preserves the core mechanism (proper scoring, solvency, aggregation) at 10× lower on-chain complexity, making it shippable on L2s today. As ZK proving and on-chain computation improve, we intend to move closer to the non-parametric, continuous-function ideal.
 
 ---
 
