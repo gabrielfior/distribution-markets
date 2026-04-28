@@ -164,6 +164,9 @@ The L2 fee roughly equilibrates expected value across σ choices — it **prices
 A trader who thinks ETH will be $3,247.63 simply submits μ = 3247.63. There are no bucket boundaries. The market price at every real number is simultaneously discoverable.
 
 ### 3B. No Liquidity Fragmentation
+
+![Liquidity Efficiency: Discrete Buckets vs Distribution Markets](liquidity_efficiency.png)
+
 All trading concentrates in a single AMM. With the same $555k volume as the Bitcoin touch market, a Distribution Market has:
 - Deeper liquidity at every price point
 - Tighter spreads
