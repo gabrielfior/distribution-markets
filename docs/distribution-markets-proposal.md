@@ -29,16 +29,6 @@ Current prediction markets like Polymarket overwhelmingly use **discrete bucket 
 - Only one bucket resolves YES
 - **$11,234 in volume split across 11 pools**
 
-### Example B: Touch Binary Market
-**"What price will Bitcoin hit April 20-26?"** ([Polymarket](https://polymarket.com/event/what-price-will-bitcoin-hit-april-20-26))
-
-- 14 separate binary markets, each with a strike price (`↑ $88k`, `↑ $86k`, `↓ $72k`, etc.)
-- **The outcomes are cumulative:** if BTC hits $90k, it has necessarily hit $88k, $86k, $84k, etc. All lower strikes resolve YES simultaneously.
-- Traders are not betting on "where the price lands" — they are betting on "whether the price path touches a level"
-- **$555,663 in volume split across 14 pools**
-
-*See Appendix A for why touch binaries estimate a fundamentally different object than a price distribution.*
-
 ### Why This Is Suboptimal
 
 | Problem | Discrete Market | What We Lose |
@@ -47,7 +37,7 @@ Current prediction markets like Polymarket overwhelmingly use **discrete bucket 
 | **Granularity ceiling** | Fixed bucket widths (e.g., $10) | Traders who think ETH will be $3,247.63 cannot express that precision |
 | **No confidence signal** | You either buy Yes or No | A trader who is "80% sure ETH is $3,200" and one who is "51% sure" make the exact same trade |
 | **Non-composable** | 11 separate binary markets | You cannot derive "P(ETH > $3,500)" from the market without summing bucket prices |
-| **Path dependence ignored** | Touch binaries are independent | A view like "BTC will be volatile but end flat" requires 8+ separate trades |
+
 | **Edge case complexity** | "If exactly on boundary, round up" | Bucket boundaries are arbitrary and create resolution disputes |
 
 In short: **discrete buckets force traders to approximate their beliefs, fragment liquidity, and discard the rich information contained in a full distribution.**
@@ -193,15 +183,6 @@ This replaces an entire grid of binary markets with a single curve.
 ### 3E. Smoother Resolution
 No arbitrary bucket boundaries. No "if exactly on boundary, round up" rules. The realized outcome maps smoothly to a payout via the PDF ratio.
 
-### 3F. Path-Dependent Events (Future Work)
-For touch binaries ("Will BTC hit $X during the week?"), a Distribution Market over the **maximum price** during the window naturally encodes touch probabilities:
-
-```
-P(max ≥ X) = 1 - CDF_market(X)
-```
-
-A single market over the maximum replaces 14 separate touch binary pools.
-
 ---
 
 ## 4. How It Works: Technical Overview
@@ -285,7 +266,7 @@ The reference σ and multiplier are **parameters to be calibrated via simulation
 For spot price markets, a single Binance candle at resolution is simple. For max/min markets, the oracle must scan all 1-minute candles in a window. Is a single-exchange oracle acceptable? How do we handle flash wicks? Should we use a multi-exchange TWAP?
 
 ### 6D. Path-Dependent Events
-Can a single distribution over the maximum price truly replace a grid of touch binaries? What information is lost by compressing the entire price path into one scalar (the max)? Is a joint distribution over (high, low, close) worth the added complexity?
+See §9A for a deeper analysis of touch markets. Open questions: Can a single distribution over the maximum price truly replace a grid of touch binaries? What information is lost by compressing the entire price path into one scalar (the max)? Is a joint distribution over (high, low, close) worth the added complexity?
 
 ### 6E. Market Maker Incentives
 In our design, there is no external LP. The "AMM" is just the pool of trader collateral. Is this sustainable? Should we allow passive LPs who deposit ETH and earn fees without taking directional risk?
@@ -323,62 +304,72 @@ We are building in public at [github.com/distribution-market-agent](https://gith
 
 ---
 
-## Appendix A: What Touch Binaries Actually Estimate
+## 9. Future Work
 
-Touch binary markets like Polymarket's "What price will Bitcoin hit April 20-26?" are structurally different from single-point price markets. Understanding this difference is crucial for designing better alternatives.
+### 9A. Touch Markets: A Path-Dependent Extension
 
-### The Cumulative Structure
+The discrete markets discussed in §1 are structurally impoverished not just because they use buckets, but because certain questions are fundamentally about **paths**, not points. Consider Polymarket's "What price will Bitcoin hit April 20-26?" — a touch binary market with 14 separate strike prices and **$555,663 in volume split across 14 pools**.
 
-Consider the upside strikes: `↑ $88k`, `↑ $86k`, `↑ $84k`, `↑ $82k`, `↑ $80k`.
+#### Why Touch Binaries Are Different
 
-If BTC hits $90k during the week, then **all five of these markets resolve YES simultaneously**. The outcomes are not mutually exclusive buckets — they are **nested thresholds**:
+In this market, the outcomes are **cumulative, not mutually exclusive**. If BTC hits $90k, then all lower strikes (`↑ $88k`, `↑ $86k`, etc.) resolve YES simultaneously:
 
 ```
 Hit $90k  →  Hit $88k  →  Hit $86k  →  Hit $84k  →  ...
     YES         YES         YES         YES
 ```
 
-This means the 14 binary markets are not 14 independent bets. They are 14 samples from a single underlying object: **the probability that the price path reaches or exceeds each strike level**.
-
-### What Traders Are Really Expressing
-
-When a trader buys YES on `↑ $88k` at 5¢, they are saying: "I believe there is more than a 5% chance BTC touches $88k." But this belief is not independent of their belief about `↑ $86k`. The two are linked by the same underlying price process.
-
-What the market as a whole is estimating is a **cumulative touch probability curve** (also called a hazard function or survival function):
+The 14 binaries are not independent bets. They are samples from a single underlying object: **the probability that the price path reaches or exceeds each strike level** — a cumulative touch probability curve (hazard function):
 
 ```
 T(K) = P(BTC price touches K or higher during the window)
 ```
 
-For any strike K, `T(K)` is monotonically decreasing as K increases. At K = $0, T(K) = 1 (BTC has certainly touched $0 at some point in its history). At K = $1,000,000, T(K) ≈ 0.
+This is structurally different from a single-point market. A touch binary asks about the **maximum of a stochastic process**, not the terminal price. The relevant distributional object is the **distribution of the running maximum**, which depends on path properties (volatility, trend, jump risk), not just the closing price.
 
-### Why This Is Not a Normal Distribution
+#### Information Loss in Discrete Touch Markets
 
-A single-point bucket market (Example A) asks: "Where will the price land at one specific time?" This is naturally modeled by a probability distribution — traders estimate a density function over price levels.
+By splitting the cumulative curve into 14 separate pools, the market loses:
 
-A touch binary market asks: "What is the highest level the price will reach?" This is a question about the **maximum of a stochastic process over a time window**. The relevant object is:
+1. **Liquidity fragmentation:** A trader who believes "BTC will hit $82k but not $88k" must trade in two separate pools
+2. **No confidence signal:** A trader cannot say "I'm 90% sure BTC hits $80k but only 10% sure it hits $88k"
+3. **Path information discarded:** The market reveals nothing about *when* or *how* BTC hit a level
 
-- The **distribution of the maximum price**, or equivalently
-- The **cumulative touch probability** as a function of strike
+#### A Distribution Market Alternative
 
-These are related to the path properties of the underlying asset (realized volatility, trend, jump risk), not just the terminal price.
-
-### The Information Loss of Discrete Touch Binaries
-
-By splitting the cumulative curve into 14 separate binary pools, Polymarket loses information:
-
-1. **Liquidity fragmentation:** A trader who believes "BTC will hit $82k but not $88k" must trade in two separate pools. They cannot express a unified view.
-2. **No confidence signal:** A trader cannot say "I'm 90% sure BTC hits $80k but only 10% sure it hits $88k." Each binary is just a point estimate.
-3. **Path information discarded:** The market reveals nothing about *when* or *how* BTC hit a level — only that it did.
-
-### What a Distribution Market Alternative Looks Like
-
-A Distribution Market over the **maximum price** during the window naturally encodes the same information as the entire grid of touch binaries:
+A Distribution Market over the **maximum price** during the window naturally encodes the same information as the entire grid:
 
 ```
 P(max ≥ K) = 1 - CDF_market(K)
 ```
 
-From a single distribution over the maximum, you can read off the touch probability at any strike. One continuous market replaces 14 binary pools, with no liquidity fragmentation and full confidence signaling via σ.
+One continuous market over the maximum replaces 14 binary pools, with no liquidity fragmentation and full confidence signaling via σ. The correct distributional object is the distribution of the running maximum (not a Normal over terminal price), which is an open research direction for extending the MVP.
 
-*Note: For path-dependent events (touch binaries), the correct distributional object is the distribution of the running maximum or a cumulative hazard curve, not a Normal distribution over the terminal price. Our MVP focuses on single-point price markets first, where a Normal distribution is appropriate.*
+### 9B. Trader Simulation Studies
+
+To validate the mechanism before mainnet deployment, we plan to run agent-based simulations that model how rational and behavioral traders interact with the market. These simulations will answer:
+
+- **How does the consensus curve evolve** as traders with heterogeneous beliefs enter the market?
+- **What do payouts look like in practice?** For example, simulate a 3-trader scenario where:
+  - Trader A: μ = $3,000, σ = $100, collateral = $10,000
+  - Trader B: μ = $3,400, σ = $200, collateral = $5,000
+  - Trader C: μ = $3,200, σ = $400, collateral = $2,000
+  - Resolution at x* = $3,150
+  
+  Show step-by-step: `f_m(x*)`, each `f_i(x*)`, the ratio `f_i / f_m`, and final payout. This makes the scoring rule concrete.
+
+- **How does σ choice affect EV?** Traders can optimize σ to maximize expected payout. Does the L2 fee successfully align private optimization with truthful revelation?
+- **What happens under manipulation?** Simulate a trader who submits an extreme μ or σ to distort the consensus. How much capital is required? Is the L2 fee sufficient deterrent?
+- **Multimodal dynamics:** Simulate bulls vs. bears clustering at different price levels. How does the gap-zone payout distribution look? Does the hybrid scoring fallback improve fairness?
+
+These simulations will be open-source and parameterizable, allowing the community to explore edge cases and inform fee calibration (§6B) before any real capital is at risk.
+
+### 9C. Liquidity Sourcing from Existing Markets
+
+A practical challenge for any new prediction market primitive is **cold-start liquidity**. Distribution Markets require traders to deposit collateral and submit distributions, but early markets may suffer from low participation and shallow consensus curves. Rather than relying solely on organic trader flow, we can explore **liquidity sourcing from existing prediction markets**:
+
+- **Polymarket integration:** Can we algorithmically translate Polymarket's discrete bucket prices into continuous distributions? For example, if a bucket market shows P(ETH < $3,000) = 20%, P($3,000–$3,500) = 50%, P(> $3,500) = 30%, we could fit a Normal or log-normal distribution that matches these quantiles and use it as an "initial market maker" position in our Distribution Market. This bootstraps the consensus curve with real market-implied information.
+- **AMM liquidity bridges:** Can passive LPs deposit capital into a Distribution Market by referencing existing AMM pools (e.g., Uniswap ETH/USDC)? The LP's position could be automatically converted into a wide σ distribution centered at the current spot price, providing initial depth without requiring the LP to manually choose μ and σ.
+- **Cross-market arbitrage:** If a Distribution Market and a Polymarket bucket market coexist for the same event, arbitrageurs could trade discrepancies between the continuous CDF and discrete bucket prices, which naturally channels liquidity toward the more efficient market.
+
+The core question is whether **imported liquidity** compromises the incentive alignment of the scoring rule. If the initial market maker is not a genuine belief holder but an algorithmic translation of external prices, does that distort payouts or create exploitable edge cases? This is an open design question for future research.
