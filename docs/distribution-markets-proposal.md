@@ -95,6 +95,41 @@ The payout formula has a remarkable property: **the sum of all payouts exactly e
 
 This is not an approximation. It is an exact algebraic identity. **The contract can never become insolvent** as long as `f_m(x*)` is computed as the capital-weighted average.
 
+### The Multimodal Mixture Problem
+
+The consensus distribution `f_m(x)` is a **mixture of Normals**, not a Normal distribution. When traders cluster around different price levels — for example, bears at $2,900 and bulls at $3,800 — the mixture develops two peaks with a low-density "gap" between them.
+
+**The gap-zone fairness issue:** If ETH resolves in that gap, all traders simultaneously receive near-zero payout, even some who were directionally correct. This is not a bug — genuine disagreement is real information. But it creates a UX problem that must be addressed explicitly.
+
+**Display recommendation:** Show the mixture density curve honestly, with annotated modes and a flag for "low-density zone between $X and $Y."
+
+**Hybrid scoring fallback (optional enhancement):** When `f_m(x*)` falls below a threshold, transition from mixture scoring `f_i / f_m` to a distance-based scoring against a reference Normal centered at the market median. This prevents the "total loss in the gap" failure mode without breaking the proper scoring rule in normal conditions.
+
+### What Users Actually See
+
+The article describes the mechanism well, but a critical question remains: **what does a user see when they open the market?**
+
+We separate **scoring** (how payouts work) from **display** (what the market shows):
+
+| Display Element | Source | Meaning |
+|---|---|---|
+| **μ* (market estimate)** | Capital-weighted median of all trader μ_i | "Where do traders think the price will land?" |
+| **σ*_spr (confidence)** | `(p84 − p16) / 2` from the μ_i distribution | "How much do traders disagree?" |
+| **Consensus curve** | The mixture `f_m(x)` | Visual density with annotated modes |
+
+**Why not derive μ and σ from the mixture?** Two markets can have identical mixture means but completely different trader disagreement. σ*_spr captures whether traders cluster tightly (unimodal consensus) or fight across price levels (bimodal disagreement). σ*_avg — the average of submitted σ_i — measures average trader self-confidence, not market-level disagreement. We keep σ*_avg as an internal signal but do not display it as the primary confidence metric.
+
+#### Display Options: Trader Disagreement vs. Mixture Modes
+
+We considered two approaches for displaying the market consensus:
+
+| Approach | μ* Source | σ* Source | Best For |
+|---|---|---|---|
+| **A. Trader disagreement** (recommended) | Median of trader μ_i | Percentile spread of μ_i distribution | "How much do traders disagree?" Robust to outliers; clearly shows unimodal vs. bimodal disagreement |
+| **B. Mixture modes** | Mode(s) of mixture `f_m(x)` | Width around dominant mode | "What is the most likely outcome according to the consensus density?" Matches the scoring curve visually |
+
+**We recommend Option A** for the primary display because it separates the scoring mechanism (which must use the mixture for solvency) from the information signal (which should reflect genuine trader disagreement). However, the UI will show both: the trader-disagreement numbers as the headline "$3,200 ± $200" and the mixture curve as the visual density plot with annotated modes.
+
 ### The L2 Norm: Paying for Confidence
 
 Solvency alone is not enough. Without additional constraints, a trader could submit an absurdly narrow distribution (σ = 0.01) with $1 of collateral, essentially buying a lottery ticket that pays 100×+ if they get lucky.
@@ -121,6 +156,15 @@ This creates three effects:
 1. **Anti-manipulation:** Extreme confidence is expensive
 2. **Truthful revelation:** Traders are incentivized to report their true σ, not fake overconfidence
 3. **Market quality:** The consensus distribution is stable and not dominated by noise
+
+#### σ_i Does Double Duty
+
+The same σ_i submitted by a trader controls two things simultaneously:
+
+- **Fee cost:** Narrow σ → higher L2 fee (a trader with σ=$50 pays ~8× more in fees than one with σ=$400)
+- **Payout multiplier:** Narrow σ → higher peak payout if correct (the same σ=$50 trader gets ~8× higher payout at the realized outcome than σ=$400)
+
+The L2 fee roughly equilibrates expected value across σ choices — it **prices** extreme confidence rather than preventing it. This is intentional: the market explicitly charges for the right to make high-conviction bets. But it should be understood clearly — narrow σ is both expensive and high-reward.
 
 ---
 
@@ -224,11 +268,18 @@ We would particularly value feedback on the following:
 Our consensus is a capital-weighted PDF average. Statistically, averaging Normal PDFs does **not** produce a Normal distribution. The result is a mixture model. Is this a problem for interpretation? Should we instead average parameters (μ, σ) and accept the solvency risk, or use a different aggregation entirely?
 
 ### 6B. L2 Fee Calibration
-Our fee formula is:
+Our fee formula uses two tunable parameters:
+
 ```
-l2Fee = collateral × L2(σ) / L2(400) × 10
+l2Fee = collateral × L2(σ) / L2(σ_reference) × multiplier
 ```
-We chose σ=400 as a reference and 10× multiplier somewhat arbitrarily. What is the optimal fee schedule? Too high = discourages trading. Too low = manipulation remains profitable.
+
+The reference σ and multiplier are **parameters to be calibrated via simulation**, not fixed design choices. For crypto assets, σ_ref might be set to 5–10% of the typical asset price (e.g., σ_ref ≈ $300–$600 for ETH at ~$3,000). The multiplier controls how aggressively the fee scales with confidence.
+
+**Open questions:**
+- What is the optimal fee schedule? Too high = discourages trading. Too low = manipulation remains profitable.
+- How do we empirically calibrate expected revenue vs. manipulation cost across a range of values?
+- Should σ_ref be dynamic (tied to recent price volatility) or static per market?
 
 ### 6C. Oracle Design
 For spot price markets, a single Binance candle at resolution is simple. For max/min markets, the oracle must scan all 1-minute candles in a window. Is a single-exchange oracle acceptable? How do we handle flash wicks? Should we use a multi-exchange TWAP?
