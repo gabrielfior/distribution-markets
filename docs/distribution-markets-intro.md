@@ -107,9 +107,9 @@ Traders submit distributions and collateral. Nothing changes until the oracle re
 | **MEV / front-running** | Significant (continuous state changes) | Minimal (no mid-market trading after submission) |
 | **Capital efficiency** | Capital rotates continuously | Capital locked until resolution |
 
-**Why we chose this tradeoff:** Our MVP prioritizes **shipability**. A resolution-time average preserves the core mechanism (proper scoring, solvency guarantee, information aggregation) while reducing on-chain complexity by 10×. The gas savings make it feasible on L2s like Gnosis today. And critically, it gives us a working foundation to iterate toward Paradigm's continuous ideal as ZK proving and on-chain computation mature. The continuous AMM is the destination; the resolution-time average is the on-ramp.
+**Why we chose this tradeoff:** Our MVP prioritizes **shipability**. A resolution-time average preserves the core mechanism (proper scoring, solvency guarantee, information aggregation) while reducing on-chain complexity by 10×. The gas savings make it feasible on L2s like Gnosis today. The continuous AMM is the destination; the resolution-time average is the on-ramp.
 
-We view this as a **practical first step** toward the full vision. As ZK proving and on-chain computation improve, we intend to move closer to non-parametric, continuous-function markets.
+We view this as a **practical first step** toward the full vision.
 
 ---
 
