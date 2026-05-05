@@ -5,8 +5,8 @@ pragma solidity ^0.8.20;
 import { NormalDistribution } from "./NormalDistribution.sol";
 
 contract DistributionMarket {
-    uint256 public constant BASE_FEE_BPS = 100;
-    uint256 public constant L2_MULTIPLIER = 10e18;
+    uint256 public constant BASE_FEE_BPS = 10;
+    uint256 public constant L2_FEE_BPS = 100;
     uint256 public constant REFERENCE_SIGMA = 400e18;
     uint256 public constant MAX_PAYOUT_MULTIPLIER = 10;
 
@@ -108,7 +108,12 @@ contract DistributionMarket {
         uint256 referenceL2 = NormalDistribution.l2Norm(REFERENCE_SIGMA);
 
         uint256 baseFee = (msg.value * BASE_FEE_BPS) / 10000;
-        uint256 l2Fee = (msg.value * l2 * L2_MULTIPLIER) / (referenceL2 * 1e18);
+        uint256 l2Fee;
+        if (referenceL2 > 0) {
+            l2Fee = (msg.value * l2 * L2_FEE_BPS) / (referenceL2 * 10000);
+        } else {
+            l2Fee = (msg.value * L2_FEE_BPS) / 10000;
+        }
         uint256 totalFee = baseFee + l2Fee;
         require(msg.value > totalFee, "fees exceed value");
 
@@ -184,7 +189,8 @@ contract DistributionMarket {
 
         require(address(this).balance >= payout, "insufficient contract balance");
 
-        payable(msg.sender).transfer(payout);
+        (bool sent, ) = payable(msg.sender).call{ value: payout }("");
+        require(sent, "payout failed");
 
         emit PayoutClaimed(marketId, msg.sender, payout);
     }
@@ -225,8 +231,10 @@ contract DistributionMarket {
                 uint256 payout = rawPayout > maxPayout ? maxPayout : rawPayout;
 
                 if (address(this).balance >= payout) {
-                    payable(msg.sender).transfer(payout);
-                    emit PayoutClaimed(marketId, msg.sender, payout);
+                    (bool sent, ) = payable(msg.sender).call{ value: payout }("");
+                    if (sent) {
+                        emit PayoutClaimed(marketId, msg.sender, payout);
+                    }
                 }
             }
         }
@@ -247,8 +255,29 @@ contract DistributionMarket {
         uint256 amount = m.accumulatedFees;
         require(amount > 0, "no fees");
         m.accumulatedFees = 0;
-        payable(owner).transfer(amount);
+        (bool sent, ) = payable(owner).call{ value: amount }("");
+        require(sent, "fee withdrawal failed");
         emit FeesWithdrawn(marketId, amount);
+    }
+
+    function getMarketSimple(uint256 marketId) external view returns (
+        int256 currentMu,
+        uint256 currentSigma,
+        uint256 b,
+        uint256 k,
+        bool resolved,
+        int256 outcome
+    ) {
+        Market storage m = markets[marketId];
+        return (m.currentMu, m.currentSigma, m.b, m.k, m.resolved, m.outcome);
+    }
+
+    function getMarketB(uint256 marketId) external view returns (uint256) {
+        return markets[marketId].b;
+    }
+
+    function getMarketK(uint256 marketId) external view returns (uint256) {
+        return markets[marketId].k;
     }
 
     function getMarket(uint256 marketId) external view returns (
