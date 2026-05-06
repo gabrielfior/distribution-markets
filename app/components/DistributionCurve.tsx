@@ -1,110 +1,130 @@
 "use client";
 
-import { useMemo } from "react";
-import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { memo, useMemo } from "react";
+import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-interface DistributionCurveProps {
-  marketMu: number;
-  marketSigma: number;
+const DIST_COLORS = ["#34495e", "#e74c3c", "#2ecc71", "#3498db", "#9b59b6", "#f39c12", "#1abc9c"];
+
+interface CurveData {
+  initialMu: number;
+  initialSigma: number;
+  currentMu: number;
+  currentSigma: number;
   userMu?: number;
   userSigma?: number;
-  actualPrice?: number;
-  height?: number;
+  k: number;
+  pastTrades?: { mu: number; sigma: number; label: string; color: string }[];
+}
+
+function fmtY(v: any) {
+  const n = Number(v);
+  if (isNaN(n)) return "";
+  if (n >= 1) return "$" + n.toFixed(2);
+  if (n >= 0.001) return "$" + n.toFixed(4);
+  return "$" + n.toExponential(1);
+}
+
+function fmtX(v: any) {
+  const n = Number(v);
+  if (isNaN(n)) return "";
+  if (n >= 1000) return "$" + (n / 1000).toFixed(n > 10000 ? 0 : 1) + "k";
+  return "$" + n.toFixed(0);
 }
 
 function normalPDF(x: number, mu: number, sigma: number): number {
   if (sigma <= 0) return 0;
-  const coeff = 1 / (sigma * Math.sqrt(2 * Math.PI));
-  const exponent = -0.5 * Math.pow((x - mu) / sigma, 2);
-  return coeff * Math.exp(exponent);
+  return (1 / (sigma * 2.5066282746310002)) * Math.exp(-0.5 * ((x - mu) / sigma) ** 2);
 }
 
-export default function DistributionCurve({
-  marketMu,
-  marketSigma,
-  userMu,
-  userSigma,
-  actualPrice,
-  height = 250,
-}: DistributionCurveProps) {
-  const data = useMemo(() => {
-    // Determine the unified x range
-    const allMus = [marketMu];
-    const allSigmas = [marketSigma];
-    if (userMu !== undefined && userSigma !== undefined) {
-      allMus.push(userMu);
-      allSigmas.push(userSigma);
+function buildCurve(data: CurveData) {
+  const allMus = [data.initialMu, data.currentMu];
+  const allSigmas = [data.initialSigma, data.currentSigma];
+  if (data.userMu !== undefined && data.userSigma !== undefined) {
+    allMus.push(data.userMu);
+    allSigmas.push(data.userSigma);
+  }
+  for (const pt of data.pastTrades || []) {
+    allMus.push(pt.mu);
+    allSigmas.push(pt.sigma);
+  }
+  const minMu = Math.min(...allMus);
+  const maxMu = Math.max(...allMus);
+  const maxSig = Math.max(...allSigmas);
+  const pad = maxSig * 3.5;
+  const xMin = minMu - pad;
+  const xMax = maxMu + pad;
+  const step = (xMax - xMin) / 80;
+
+  const showUser = data.userMu !== undefined && data.userSigma !== undefined;
+  const initLambda = data.k / (1 / Math.sqrt(2 * data.initialSigma * Math.sqrt(Math.PI)));
+  const curLambda = data.k / (1 / Math.sqrt(2 * data.currentSigma * Math.sqrt(Math.PI)));
+
+  const isSame = (a: number, b: number) => Math.abs(a - b) < 0.01;
+
+  let maxVal = 0;
+  const points: Record<string, number>[] = [];
+  for (let x = xMin; x <= xMax; x += step) {
+    const p: Record<string, number> = { x: Math.round(x) };
+    const iv = initLambda * normalPDF(x, data.initialMu, data.initialSigma);
+    const cv = curLambda * normalPDF(x, data.currentMu, data.currentSigma);
+    p["Initial f₀"] = iv;
+    p["Current market"] = cv;
+    if (showUser) {
+      const lam = data.k / (1 / Math.sqrt(2 * data.userSigma! * Math.sqrt(Math.PI)));
+      const uv = lam * normalPDF(x, data.userMu!, data.userSigma!);
+      p["Your prediction"] = uv;
+      maxVal = Math.max(uv, maxVal);
     }
-
-    const minMu = Math.min(...allMus);
-    const maxMu = Math.max(...allMus);
-    const maxSigma = Math.max(...allSigmas);
-
-    const xMin = minMu - 3.5 * maxSigma;
-    const xMax = maxMu + 3.5 * maxSigma;
-    const step = (xMax - xMin) / 200;
-
-    const points = [];
-    for (let x = xMin; x <= xMax; x += step) {
-      points.push({
-        x: Math.round(x),
-        market: normalPDF(x, marketMu, marketSigma),
-        user: userMu !== undefined && userSigma !== undefined ? normalPDF(x, userMu, userSigma) : 0,
-      });
+    for (const pt of data.pastTrades || []) {
+      if (isSame(pt.mu, data.currentMu) && isSame(pt.sigma, data.currentSigma)) continue;
+      const lam = data.k / (1 / Math.sqrt(2 * pt.sigma * Math.sqrt(Math.PI)));
+      p[pt.label] = lam * normalPDF(x, pt.mu, pt.sigma);
     }
-    return points;
-  }, [marketMu, marketSigma, userMu, userSigma]);
+    maxVal = Math.max(iv, cv, maxVal);
+    points.push(p);
+  }
 
-  const hasUserDist = userMu !== undefined && userSigma !== undefined;
+  const config = [
+    { key: "Initial f₀", color: DIST_COLORS[0], dash: "5 5" },
+    { key: "Current market", color: "#8884d8" },
+  ];
+  if (showUser) config.push({ key: "Your prediction", color: DIST_COLORS[1], dash: "5 5" });
+  for (const pt of data.pastTrades || []) {
+    if (isSame(pt.mu, data.currentMu) && isSame(pt.sigma, data.currentSigma)) continue;
+    config.push({ key: pt.label, color: pt.color });
+  }
+
+  const yMax = maxVal > 0 ? maxVal * 1.15 : 1;
+  return { chartData: points, config, xDomain: [xMin, xMax] as [number, number], yMax };
+}
+
+const DistributionCurve = memo(function DistributionCurve({ data, height = 400 }: { data: CurveData; height?: number }) {
+  const { chartData, config, xDomain, yMax } = useMemo(() => buildCurve(data), [data]);
+
+  if (chartData.length === 0) {
+    return <div className="bg-base-200 rounded-lg p-4 flex items-center justify-center" style={{ height, minHeight: 400 }}><p className="text-base-content/50">No data</p></div>;
+  }
 
   return (
-    <div className="w-full bg-base-200 rounded-lg p-4" style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-          <XAxis
-            dataKey="x"
-            type="number"
-            domain={["auto", "auto"]}
-            tick={{ fontSize: 12 }}
-            tickFormatter={val => `$${val.toLocaleString()}`}
-          />
-          <YAxis hide domain={[0, "auto"]} />
+    <div className="bg-base-200 rounded-lg p-4" style={{ height, minHeight: 400 }}>
+      <h4 className="text-sm font-bold mb-2 text-base-content/70">Distributions</h4>
+      <ResponsiveContainer width="100%" height="100%" aspect={4 / 3}>
+        <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+          <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={fmtX} />
+          <YAxis domain={[0, yMax]} width={65} tick={{ fontSize: 11 }} tickFormatter={fmtY} />
           <Tooltip
-            formatter={value => (typeof value === "number" ? value.toExponential(2) : value)}
-            labelFormatter={label => `Price: $${Number(label).toLocaleString()}`}
+            formatter={(value: any) => Number(value).toFixed(4)}
+            labelFormatter={(label: any) => `x = $${Number(label).toLocaleString()}`}
           />
-          <Line
-            type="monotone"
-            dataKey="market"
-            stroke="#8884d8"
-            strokeWidth={3}
-            dot={false}
-            name="Market consensus"
-            isAnimationActive={false}
-          />
-          {hasUserDist && (
-            <Line
-              type="monotone"
-              dataKey="user"
-              stroke="#82ca9d"
-              strokeWidth={3}
-              dot={false}
-              strokeDasharray="5 5"
-              name="Your prediction"
-              isAnimationActive={false}
-            />
-          )}
-          {actualPrice && (
-            <ReferenceLine
-              x={actualPrice}
-              stroke="#ef4444"
-              strokeWidth={2}
-              strokeDasharray="3 3"
-              label={{ value: "Outcome", position: "top", fill: "#ef4444", fontSize: 12 }}
-            />
-          )}
-        </LineChart>
+          <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+          {config.map(c => (
+            <Area key={c.key} type="monotone" dataKey={c.key} stroke={c.color} strokeWidth={c.dash ? 2 : 2.5} strokeDasharray={c.dash} fill={c.color} fillOpacity={0.03} dot={false} isAnimationActive={false} />
+          ))}
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );
-}
+});
+
+export default DistributionCurve;

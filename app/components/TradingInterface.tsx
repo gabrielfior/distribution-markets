@@ -1,297 +1,347 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useDeferredValue, useMemo, useState } from "react";
+import { parseEther } from "viem";
+import { useAccount, useReadContracts, useWriteContract } from "wagmi";
+import { useDeployedContractInfo, useScaffoldReadContract } from "~~/hooks/scaffold-eth";
+import { notification } from "~~/utils/scaffold-eth";
+import { computeCollateral, computeTotalToSend } from "~~/utils/distributionMath";
 import DistributionCurve from "./DistributionCurve";
+import PayoutChart from "./PayoutChart";
 
 interface TradingInterfaceProps {
-  market: {
-    id: string;
-    question: string;
-    marketMu: number;
-    marketSigma: number;
-  };
+  marketId: string;
 }
 
-function normalPDF(x: number, mu: number, sigma: number): number {
-  if (sigma <= 0) return 0;
-  const coeff = 1 / (sigma * Math.sqrt(2 * Math.PI));
-  const exponent = -0.5 * Math.pow((x - mu) / sigma, 2);
-  return coeff * Math.exp(exponent);
+const SCALE = 1e18;
+const TRADE_COLORS = ["#e74c3c", "#2ecc71", "#3498db", "#9b59b6", "#f39c12", "#1abc9c", "#e67e22", "#34495e"];
+
+function calcSigmaMin(k: number, b: number): number {
+  if (k <= 0 || b <= 0) return 0;
+  return (k * k) / (b * b * Math.sqrt(Math.PI));
 }
 
-function l2Norm(sigma: number): number {
-  // L2(σ) = 1 / sqrt(2 * σ * sqrt(pi))
-  const sqrtPi = Math.sqrt(Math.PI);
-  return 1 / Math.sqrt(2 * sigma * sqrtPi);
-}
+export default function TradingInterface({ marketId }: TradingInterfaceProps) {
+  const { address, chainId } = useAccount();
+  const [userMu, setUserMu] = useState<number | null>(null);
+  const [userSigma, setUserSigma] = useState<number | null>(null);
 
-export default function TradingInterface({ market }: TradingInterfaceProps) {
-  const [userMu, setUserMu] = useState(market.marketMu);
-  const [userSigma, setUserSigma] = useState(market.marketSigma);
-  const [resolutionValue, setResolutionValue] = useState(market.marketMu);
-  const [collateral, setCollateral] = useState(0.01); // ETH
+  const { data: contractInfo } = useDeployedContractInfo({ contractName: "DistributionMarket" });
+  const contractAddress = contractInfo?.address;
 
-  // Constants matching the smart contract plan
-  const MIN_BACKING = 0.001; // ETH (~$1-2)
-  const BASE_FEE_BPS = 100; // 1%
-  const REFERENCE_SIGMA = 400;
+  const { data: marketData, isLoading } = useScaffoldReadContract({
+    contractName: "DistributionMarket",
+    functionName: "getMarketSimple",
+    args: [BigInt(marketId)],
+  });
 
-  // Compute L2 norm and minimum collateral
-  const l2 = useMemo(() => l2Norm(userSigma), [userSigma]);
-  const minCollateral = useMemo(() => {
-    return l2 * MIN_BACKING; // simplified for frontend
-  }, [l2]);
+  const { data: tradeCountData } = useScaffoldReadContract({
+    contractName: "DistributionMarket",
+    functionName: "getTradeCount",
+    args: [BigInt(marketId)],
+  });
 
-  // Fee breakdown
-  // Using corrected L2 scaling: the raw plan formula produces fees >100% of collateral.
-  // We scale by 0.01 to match the plan's example table (1% at σ=400, ~6% at σ=10).
-  const { baseFee, l2Fee, totalFee, netCollateral } = useMemo(() => {
-    const base = (collateral * BASE_FEE_BPS) / 10000;
-    const referenceL2 = l2Norm(REFERENCE_SIGMA);
-    const l2Ratio = referenceL2 > 0 ? l2 / referenceL2 : 1;
-    const l2FeeAmount = collateral * l2Ratio * 0.01; // 1% base × L2 ratio
-    const total = base + l2FeeAmount;
-    const net = Math.max(0, collateral - total);
-    return {
-      baseFee: base,
-      l2Fee: l2FeeAmount,
-      totalFee: total,
-      netCollateral: net,
-    };
-  }, [collateral, l2]);
+  const tradeCount = tradeCountData ? Number(tradeCountData) : 0;
+  const tradeIndices = useMemo(() => Array.from({ length: tradeCount }, (_, i) => i), [tradeCount]);
 
-  // Payout proportional to PDF ratio at outcome
-  // payout = collateral * (traderPDF / marketPDF)
-  const { payout, profit, traderPDF, marketPDF, pdfRatio } = useMemo(() => {
-    const tPDF = normalPDF(resolutionValue, userMu, userSigma);
-    const mPDF = normalPDF(resolutionValue, market.marketMu, market.marketSigma);
+  const { data: tradesBatch } = useReadContracts({
+    contracts: tradeIndices.map(idx => ({
+      address: contractAddress!,
+      abi: [{
+        type: "function" as const,
+        name: "getTrade",
+        inputs: [
+          { name: "marketId", type: "uint256", internalType: "uint256" },
+          { name: "tradeIndex", type: "uint256", internalType: "uint256" },
+        ],
+        outputs: [
+          { name: "trader", type: "address", internalType: "address" },
+          { name: "prevMu", type: "int256", internalType: "int256" },
+          { name: "prevSigma", type: "uint256", internalType: "uint256" },
+          { name: "tradeMu", type: "int256", internalType: "int256" },
+          { name: "tradeSigma", type: "uint256", internalType: "uint256" },
+          { name: "collateral", type: "uint256", internalType: "uint256" },
+          { name: "feePaid", type: "uint256", internalType: "uint256" },
+          { name: "claimed", type: "bool", internalType: "bool" },
+        ],
+        stateMutability: "view",
+      }],
+      functionName: "getTrade",
+      args: [BigInt(marketId), BigInt(idx)],
+    })),
+    query: { enabled: tradeCount > 0 && !!contractAddress },
+  });
 
-    if (mPDF > 0) {
-      const ratio = tPDF / mPDF;
-      const p = netCollateral * ratio;
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const initialMu = marketData ? Number(marketData[6]) / SCALE : 3200;
+  const initialSigma = marketData ? Number(marketData[7]) / SCALE : 400;
+  const currentMu = marketData ? Number(marketData[0]) / SCALE : 3200;
+  const currentSigma = marketData ? Number(marketData[1]) / SCALE : 400;
+  const b = marketData ? Number(marketData[2]) / SCALE : 0.01;
+  const k = marketData ? Number(marketData[3]) / SCALE : 0.997;
+  const resolved = marketData ? marketData[4] : false;
+  const outcome = marketData ? Number(marketData[5]) / SCALE : 0;
+  const sigmaMin = calcSigmaMin(k, b);
+
+  const pastTrades = useMemo(() => {
+    if (!tradesBatch || tradesBatch.length === 0) return [];
+    return tradesBatch.map((r, i) => {
+      if (!r.result) return null;
+      const d = r.result as readonly [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean];
       return {
-        payout: p,
-        profit: p - collateral,
-        traderPDF: tPDF,
-        marketPDF: mPDF,
-        pdfRatio: ratio,
+        index: i,
+        trader: d[0],
+        prevMu: Number(d[1]) / SCALE,
+        prevSigma: Number(d[2]) / SCALE,
+        tradeMu: Number(d[3]) / SCALE,
+        tradeSigma: Number(d[4]) / SCALE,
+        collateral: Number(d[5]) / SCALE,
+        feePaid: Number(d[6]) / SCALE,
+        claimed: d[7],
       };
-    }
-    return {
-      payout: 0,
-      profit: -collateral,
-      traderPDF: tPDF,
-      marketPDF: mPDF,
-      pdfRatio: 0,
-    };
-  }, [resolutionValue, userMu, userSigma, market.marketMu, market.marketSigma, netCollateral, collateral]);
+    }).filter(Boolean) as {
+      index: number; trader: string; prevMu: number; prevSigma: number;
+      tradeMu: number; tradeSigma: number; collateral: number; feePaid: number; claimed: boolean;
+    }[];
+  }, [tradesBatch]);
 
-  const maxRange = Math.round(market.marketMu + 3 * market.marketSigma);
-  const minRange = Math.round(market.marketMu - 3 * market.marketSigma);
+  useEffect(() => {
+    if (!marketData) return;
+    if (userMu === null) setUserMu(currentMu);
+    if (userSigma === null) setUserSigma(currentSigma);
+  }, [marketData, currentMu, currentSigma, userMu, userSigma]);
+
+  const muRaw = userMu ?? currentMu;
+  const sigmaRaw = userSigma ?? currentSigma;
+  const mu = useDeferredValue(muRaw);
+  const sigma = useDeferredValue(sigmaRaw);
+
+  const collateral = useMemo(() => {
+    if (sigmaRaw <= 0 || muRaw <= 0 || k <= 0) return 0;
+    return computeCollateral(k, currentMu, currentSigma, muRaw, sigmaRaw);
+  }, [k, currentMu, currentSigma, muRaw, sigmaRaw]);
+
+  const { total: totalEthToSend } = useMemo(() => {
+    if (collateral <= 0) return { total: 0, fees: 0 };
+    return computeTotalToSend(collateral, sigmaRaw);
+  }, [collateral, sigmaRaw]);
+
+  const userChangedMu = mu !== currentMu;
+  const userChangedSigma = sigma !== currentSigma;
+  const showUserPreview = userChangedMu || userChangedSigma;
+
+  const curveData = useMemo(() => ({
+    initialMu,
+    initialSigma,
+    currentMu,
+    currentSigma,
+    userMu: showUserPreview ? mu : undefined,
+    userSigma: showUserPreview ? sigma : undefined,
+    k,
+    pastTrades: pastTrades.map(t => ({
+      mu: t.tradeMu,
+      sigma: t.tradeSigma,
+      label: `Trade #${t.index + 1}`,
+      color: TRADE_COLORS[(t.index + 1) % TRADE_COLORS.length],
+    })),
+  }), [initialMu, initialSigma, currentMu, currentSigma, mu, sigma, k, showUserPreview, pastTrades]);
+
+  const previewTrades = useMemo(() => {
+    const result: {
+      label: string; prevMu: number; prevSigma: number;
+      tradeMu: number; tradeSigma: number; collateral: number; k: number;
+    }[] = [];
+
+    if (showUserPreview) {
+      result.push({
+        label: `Your trade (μ=${mu.toFixed(0)}, σ=${sigma.toFixed(0)})`,
+        prevMu: currentMu, prevSigma: currentSigma,
+        tradeMu: mu, tradeSigma: sigma, collateral, k,
+      });
+    }
+
+    pastTrades.forEach(t => {
+      result.push({
+        label: `Trade #${t.index + 1} (μ=${t.tradeMu.toFixed(0)}, σ=${t.tradeSigma.toFixed(0)})`,
+        prevMu: t.prevMu, prevSigma: t.prevSigma,
+        tradeMu: t.tradeMu, tradeSigma: t.tradeSigma,
+        collateral: t.collateral, k,
+      });
+    });
+
+    return result;
+  }, [pastTrades, showUserPreview, mu, sigma, currentMu, currentSigma, collateral, k]);
+
+  const handleTrade = async () => {
+    if (!address || !chainId) {
+      notification.error("Connect your wallet first");
+      return;
+    }
+    if (sigma < sigmaMin) {
+      notification.error("Sigma below minimum");
+      return;
+    }
+    if (totalEthToSend <= 0) {
+      notification.error("Invalid collateral amount");
+      return;
+    }
+    try {
+      await writeContractAsync({
+        address: contractAddress!,
+        abi: [{
+          type: "function" as const, name: "trade",
+          inputs: [
+            { name: "marketId", type: "uint256", internalType: "uint256" },
+            { name: "mu", type: "int256", internalType: "int256" },
+            { name: "sigma", type: "uint256", internalType: "uint256" },
+          ],
+          outputs: [], stateMutability: "payable",
+        }],
+        functionName: "trade",
+        args: [BigInt(marketId), BigInt(Math.round(mu * SCALE)), BigInt(Math.round(sigma * SCALE))],
+        value: parseEther(totalEthToSend.toFixed(18)),
+      });
+      notification.success("Trade sent!");
+    } catch (e: any) {
+      notification.error(e?.shortMessage || e?.message || "Trade failed");
+    }
+  };
+
+  if (isLoading) return <div className="text-center p-8">Loading market...</div>;
 
   return (
     <div className="space-y-6">
-      <DistributionCurve
-        marketMu={market.marketMu}
-        marketSigma={market.marketSigma}
-        userMu={userMu}
-        userSigma={userSigma}
-        actualPrice={resolutionValue}
-        height={300}
-      />
+      <h2 className="text-2xl font-bold">Market Visualization</h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <DistributionCurve data={curveData} height={400} />
+        <PayoutChart trades={previewTrades} k={k} height={400} />
+      </div>
+
+      {pastTrades.length > 0 && (
+        <div className="bg-base-200 p-6 rounded-lg">
+          <h3 className="text-lg font-bold mb-4">Trade History ({pastTrades.length})</h3>
+          <div className="overflow-x-auto">
+            <table className="table table-zebra text-sm w-full">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Prev μ</th>
+                  <th>Prev σ</th>
+                  <th>Trade μ</th>
+                  <th>Trade σ</th>
+                  <th>Collateral</th>
+                  <th>Fee</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pastTrades.map(t => (
+                  <tr key={t.index}>
+                    <td>{t.index + 1}</td>
+                    <td>{t.prevMu.toFixed(0)}</td>
+                    <td>{t.prevSigma.toFixed(1)}</td>
+                    <td className="font-medium">{t.tradeMu.toFixed(0)}</td>
+                    <td>{t.tradeSigma.toFixed(1)}</td>
+                    <td>{t.collateral.toFixed(6)} ETH</td>
+                    <td>{t.feePaid.toFixed(6)} ETH</td>
+                    <td>{t.claimed ? <span className="badge badge-success badge-sm">Claimed</span> :
+                      <span className="badge badge-ghost badge-sm">Open</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="bg-base-200 p-6 rounded-lg">
-        <h3 className="text-lg font-bold mb-4">Your Prediction</h3>
+        <h3 className="text-lg font-bold mb-4">Trade</h3>
+
+        <div className="stats shadow mb-4 w-full">
+          <div className="stat">
+            <div className="stat-title">Market μ</div>
+            <div className="stat-value text-lg">${currentMu.toLocaleString()}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-title">Market σ</div>
+            <div className="stat-value text-lg">{currentSigma.toLocaleString()}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-title">Min σ</div>
+            <div className="stat-value text-lg text-warning">{sigmaMin.toFixed(2)}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-title">Backing (b)</div>
+            <div className="stat-value text-lg">{b.toFixed(4)} ETH</div>
+          </div>
+        </div>
 
         <div className="space-y-6">
-          {/* Expected Price (μ) */}
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Expected Price (μ): <span className="text-primary">${userMu.toLocaleString()}</span>
+                Expected Price (μ): <span className="text-primary">${muRaw.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
-              min={minRange}
-              max={maxRange}
-              value={userMu}
+              min={Math.round(currentMu * 0.5)}
+              max={Math.round(currentMu * 1.5)}
+              value={muRaw}
               step={1}
               onChange={e => setUserMu(Number(e.target.value))}
               className="range range-primary w-full"
             />
-            <div className="flex justify-between text-xs text-base-content/50 mt-1">
-              <span>${minRange.toLocaleString()}</span>
-              <span>${maxRange.toLocaleString()}</span>
-            </div>
           </div>
 
-          {/* Confidence (σ) */}
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Confidence (σ): <span className="text-secondary">{userSigma.toLocaleString()}</span>
+                Confidence (σ): <span className="text-secondary">{sigmaRaw.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
-              min={Math.round(market.marketSigma * 0.2)}
-              max={Math.round(market.marketSigma * 3)}
-              value={userSigma}
+              min={Math.max(Math.round(sigmaMin), 1)}
+              max={Math.round(currentSigma * 3)}
+              value={sigmaRaw}
               step={1}
               onChange={e => setUserSigma(Number(e.target.value))}
               className="range range-secondary w-full"
             />
-            <div className="flex justify-between text-xs text-base-content/50 mt-1">
-              <span>Narrow (confident)</span>
-              <span>Wide (uncertain)</span>
-            </div>
+            {sigmaRaw < sigmaMin && (
+              <p className="text-error text-sm mt-1">σ below minimum. Increase width.</p>
+            )}
           </div>
 
-          {/* Collateral / Stake */}
-          <div className="pt-4 border-t border-base-300">
-            <label className="label">
-              <span className="label-text font-medium">
-                Stake (ETH): <span className="text-accent">{collateral.toFixed(4)} ETH</span>
-              </span>
-            </label>
-            <input
-              type="range"
-              min={0.001}
-              max={1}
-              step={0.001}
-              value={collateral}
-              onChange={e => setCollateral(Number(e.target.value))}
-              className="range range-accent w-full"
-            />
-            <div className="flex justify-between text-xs text-base-content/50 mt-1">
-              <span>0.001 ETH</span>
-              <span>1 ETH</span>
-            </div>
-            <p className="text-xs text-base-content/50 mt-2">Minimum for this σ: {minCollateral.toFixed(4)} ETH</p>
-          </div>
-
-          {/* Resolution Value */}
-          <div className="pt-4 border-t border-base-300">
-            <label className="label">
-              <span className="label-text font-medium">
-                Resolution Price (outcome): <span className="text-error">${resolutionValue.toLocaleString()}</span>
-              </span>
-            </label>
-            <input
-              type="range"
-              min={minRange}
-              max={maxRange}
-              value={resolutionValue}
-              step={1}
-              onChange={e => setResolutionValue(Number(e.target.value))}
-              className="range range-error w-full"
-            />
-            <div className="flex justify-between text-xs text-base-content/50 mt-1">
-              <span>${minRange.toLocaleString()}</span>
-              <span>${maxRange.toLocaleString()}</span>
-            </div>
-            <p className="text-xs text-base-content/50 mt-2">
-              Simulate the actual outcome. See how your payout changes.
-            </p>
-          </div>
-        </div>
-
-        {/* Payout Box */}
-        <div className="mt-6 p-4 bg-base-100 rounded-lg space-y-3">
-          <h4 className="font-bold text-sm uppercase tracking-wide text-base-content/70">Hypothetical Payout</h4>
-
-          {/* Collateral Breakdown */}
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="flex justify-between items-center p-4 bg-base-100 rounded-lg">
             <div>
-              <span className="text-base-content/60">Your Stake:</span>
-              <div className="font-mono font-medium">{collateral.toFixed(4)} ETH</div>
+              <div className="text-sm text-base-content/60">Collateral Required</div>
+              <div className="font-mono font-bold text-lg">{collateral.toFixed(6)} ETH</div>
             </div>
-            <div>
-              <span className="text-base-content/60">Net Collateral:</span>
-              <div className="font-mono font-medium">{netCollateral.toFixed(4)} ETH</div>
-            </div>
-          </div>
-
-          <div className="p-2 bg-base-200 rounded text-xs text-base-content/60 space-y-1">
-            <div className="flex justify-between">
-              <span>Base Fee (1%):</span>
-              <span className="font-mono">{baseFee.toFixed(6)} ETH</span>
-            </div>
-            <div className="flex justify-between">
-              <span>L2 Fee:</span>
-              <span className="font-mono">{l2Fee.toFixed(6)} ETH</span>
-            </div>
-            <div className="flex justify-between font-semibold border-t border-base-300 pt-1">
-              <span>Total Fees:</span>
-              <span className="font-mono">{totalFee.toFixed(6)} ETH</span>
+            <div className="text-right">
+              <div className="text-sm text-base-content/60">Total to Send</div>
+              <div className="font-mono font-bold text-lg text-primary">{totalEthToSend.toFixed(6)} ETH</div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 text-sm pt-2">
-            <div>
-              <span className="text-base-content/60">PDF Ratio:</span>
-              <div
-                className={`font-mono font-medium ${pdfRatio > 1 ? "text-success" : pdfRatio > 0 ? "text-error" : "text-base-content/50"}`}
-              >
-                {pdfRatio.toFixed(3)}x
-              </div>
-            </div>
-            <div>
-              <span className="text-base-content/60">Your PDF:</span>
-              <div className="font-mono font-medium">{traderPDF.toExponential(3)}</div>
-            </div>
-            <div>
-              <span className="text-base-content/60">Market PDF:</span>
-              <div className="font-mono font-medium">{marketPDF.toExponential(3)}</div>
-            </div>
-          </div>
-
-          <div className="pt-3 border-t border-base-300">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-base-content/60">Payout:</span>
-              <span className="font-mono font-bold">{payout.toFixed(4)} ETH</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="font-semibold">Net Profit/Loss:</span>
-              <span
-                className={`font-mono font-bold text-lg ${profit > 0 ? "text-success" : profit < 0 ? "text-error" : ""}`}
-              >
-                {profit > 0 ? "+" : ""}
-                {profit.toFixed(4)} ETH
-              </span>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-base-200 text-xs text-base-content/60 space-y-2">
-            <p>
-              <strong>How the payout works:</strong> Payout = Net Collateral × (your PDF / market PDF). Fees are
-              deducted upfront. You profit when your probability density at the outcome is higher than the
-              market&apos;s.
-            </p>
-            <p>
-              <strong>What is PDF?</strong> Probability Density Function — the height of the bell curve at a specific
-              point. Higher = more probability mass concentrated there. Narrow distributions have taller peaks; wide
-              distributions have flatter peaks.
-            </p>
-            <p>
-              <strong>L2 Fee:</strong> Higher confidence (narrower σ) requires higher fees to prevent manipulation. A
-              very narrow prediction costs significantly more.
-            </p>
-            <p className="text-base-content/40">
-              Reference: Distribution Markets (2024) —{" "}
-              <a
-                href="https://www.paradigm.xyz/2024/12/distribution-markets"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-primary"
-              >
-                paradigm.xyz/2024/12/distribution-markets
-              </a>
-            </p>
-          </div>
+          <button
+            className="btn btn-primary w-full"
+            onClick={handleTrade}
+            disabled={isPending || sigma <= 0 || sigma < sigmaMin || totalEthToSend <= 0}
+          >
+            {isPending ? "Confirm in wallet..." : "Execute Trade"}
+          </button>
         </div>
       </div>
+
+      {resolved && (
+        <div className="alert alert-success">
+          <span>Resolved at {outcome}</span>
+        </div>
+      )}
     </div>
   );
 }
