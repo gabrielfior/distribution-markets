@@ -16,15 +16,19 @@ interface CurveData {
   pastTrades?: { mu: number; sigma: number; label: string; color: string }[];
 }
 
-function fmtY(v: number) {
-  if (v >= 1) return "$" + v.toFixed(2);
-  if (v >= 0.001) return "$" + v.toFixed(4);
-  return "$" + v.toExponential(1);
+function fmtY(v: any) {
+  const n = Number(v);
+  if (isNaN(n)) return "";
+  if (n >= 1) return "$" + n.toFixed(2);
+  if (n >= 0.001) return "$" + n.toFixed(4);
+  return "$" + n.toExponential(1);
 }
 
-function fmtX(v: number) {
-  if (v >= 1000) return "$" + (v / 1000).toFixed(v > 10000 ? 0 : 1) + "k";
-  return "$" + v.toFixed(0);
+function fmtX(v: any) {
+  const n = Number(v);
+  if (isNaN(n)) return "";
+  if (n >= 1000) return "$" + (n / 1000).toFixed(n > 10000 ? 0 : 1) + "k";
+  return "$" + n.toFixed(0);
 }
 
 function normalPDF(x: number, mu: number, sigma: number): number {
@@ -110,8 +114,8 @@ const DistributionCurve = memo(function DistributionCurve({ data, height = 400 }
           <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={fmtX} />
           <YAxis domain={[0, yMax]} width={65} tick={{ fontSize: 11 }} tickFormatter={fmtY} />
           <Tooltip
-            formatter={(value: number) => value.toFixed(4)}
-            labelFormatter={label => `x = $${Number(label).toLocaleString()}`}
+            formatter={(value: any) => Number(value).toFixed(4)}
+            labelFormatter={(label: any) => `x = $${Number(label).toLocaleString()}`}
           />
           <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
           {config.map(c => (

@@ -22,15 +22,19 @@ interface PayoutChartProps {
   height?: number;
 }
 
-function fmtY(v: number) {
-  if (v >= 1) return "$" + v.toFixed(2);
-  if (v >= 0.001) return "$" + v.toFixed(4);
-  return "$" + v.toExponential(1);
+function fmtY(v: any) {
+  const n = Number(v);
+  if (isNaN(n)) return "";
+  if (n >= 1) return "$" + n.toFixed(2);
+  if (n >= 0.001) return "$" + n.toFixed(4);
+  return "$" + n.toExponential(1);
 }
 
-function fmtX(v: number) {
-  if (v >= 1000) return "$" + (v / 1000).toFixed(v > 10000 ? 0 : 1) + "k";
-  return "$" + v.toFixed(0);
+function fmtX(v: any) {
+  const n = Number(v);
+  if (isNaN(n)) return "";
+  if (n >= 1000) return "$" + (n / 1000).toFixed(n > 10000 ? 0 : 1) + "k";
+  return "$" + n.toFixed(0);
 }
 
 function buildPayout(trades: TradePreview[], k: number) {
@@ -92,11 +96,12 @@ const PayoutChart = memo(function PayoutChart({ trades, k, height = 400 }: Payou
           <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={fmtX} />
           <YAxis domain={yDomain} width={65} tick={{ fontSize: 11 }} tickFormatter={fmtY} />
           <Tooltip
-            formatter={(value: number, name: string) => {
-              if (name.endsWith("_pos")) return null;
-              return [value.toFixed(4), name];
+            formatter={(value: any, name: any) => {
+              const n = Number(value);
+              if (String(name).endsWith("_pos")) return null;
+              return [n.toFixed(4), name];
             }}
-            labelFormatter={label => `x = $${Number(label).toLocaleString()}`}
+            labelFormatter={(label: any) => `x = $${Number(label).toLocaleString()}`}
           />
           <ReferenceLine y={0} stroke="rgba(0,0,0,0.3)" strokeWidth={1} strokeDasharray="4 4" />
           <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
