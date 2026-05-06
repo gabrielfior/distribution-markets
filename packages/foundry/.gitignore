@@ -1,3 +1,6 @@
+# Dependencies (installed via forge install / git submodule)
+lib/
+
 # Compiler files
 cache/
 out/
