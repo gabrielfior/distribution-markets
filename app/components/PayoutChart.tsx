@@ -23,7 +23,7 @@ interface PayoutChartProps {
 }
 
 function buildPayout(trades: TradePreview[], k: number) {
-  if (trades.length === 0) return { chartData: [] };
+  if (trades.length === 0) return { chartData: [], xDomain: [0, 1] as [number, number], yDomain: [0, 1] as [number, number] };
 
   const allPrevMu = trades.map(t => t.prevMu);
   const allTradeMu = trades.map(t => t.tradeMu);
@@ -32,10 +32,14 @@ function buildPayout(trades: TradePreview[], k: number) {
   const minMu = Math.min(...allPrevMu, ...allTradeMu);
   const maxMu = Math.max(...allPrevMu, ...allTradeMu);
   const maxSig = Math.max(...allPrevSig, ...allTradeSig);
-  const xMin = minMu - 4 * maxSig - 2;
-  const xMax = maxMu + 4 * maxSig + 2;
-  const step = (xMax - xMin) / 80;
+  const pad = maxSig * 5;
+  const xMin = minMu - pad;
+  const xMax = maxMu + pad;
+  const width = xMax - xMin;
+  const step = width / 80;
 
+  let minVal = Infinity;
+  let maxVal = -Infinity;
   const points: Record<string, number>[] = [];
   for (let x = xMin; x <= xMax; x += step) {
     const p: Record<string, number> = { x: Math.round(x) };
@@ -45,14 +49,21 @@ function buildPayout(trades: TradePreview[], k: number) {
       const payout = tradeScaled - prevScaled;
       p[t.label] = payout;
       p[t.label + "_pos"] = payout > 0 ? payout : undefined;
+      if (payout < minVal) minVal = payout;
+      if (payout > maxVal) maxVal = payout;
     });
     points.push(p);
   }
-  return { chartData: points };
+  const yPad = Math.max(Math.abs(maxVal - minVal) * 0.1, 0.001);
+  return {
+    chartData: points,
+    xDomain: [xMin, xMax] as [number, number],
+    yDomain: [minVal - yPad, maxVal + yPad] as [number, number],
+  };
 }
 
 const PayoutChart = memo(function PayoutChart({ trades, k, height = 400 }: PayoutChartProps) {
-  const { chartData } = useMemo(() => buildPayout(trades, k), [trades, k]);
+  const { chartData, xDomain, yDomain } = useMemo(() => buildPayout(trades, k), [trades, k]);
 
   return (
     <div className="bg-base-200 rounded-lg p-4" style={{ height }}>
@@ -60,8 +71,8 @@ const PayoutChart = memo(function PayoutChart({ trades, k, height = 400 }: Payou
       <ResponsiveContainer width="100%" height="100%" minHeight={400}>
         <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-          <XAxis dataKey="x" type="number" domain={["auto", "auto"]} tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-          <YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} tickFormatter={v => `$${v.toFixed(2)}`} />
+          <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(v > 10000 ? 0 : 1)}k`} />
+          <YAxis domain={yDomain} tick={{ fontSize: 11 }} tickFormatter={v => `$${v.toFixed(2)}`} />
           <Tooltip
             formatter={(value: number, name: string) => {
               if (name.endsWith("_pos")) return null;
