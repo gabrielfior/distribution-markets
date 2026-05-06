@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { parseEther } from "viem";
-import { useAccount } from "wagmi";
-import DistributionCurve from "./DistributionCurve";
-import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
+import { useAccount, useWriteContract } from "wagmi";
+import { useScaffoldReadContract } from "~~/hooks/scaffold-eth";
 import { notification } from "~~/utils/scaffold-eth";
+import DistributionCurve from "./DistributionCurve";
 import { computeCollateral, computeTotalToSend, scaledPDF, computeKFromGaussian } from "~~/utils/distributionMath";
 
 interface TradingInterfaceProps {
@@ -14,11 +14,16 @@ interface TradingInterfaceProps {
 
 const SCALE = 1e18;
 
+function calcSigmaMin(k: number, b: number): number {
+  if (k <= 0 || b <= 0) return 0;
+  return (k * k) / (b * b * Math.sqrt(Math.PI));
+}
+
 export default function TradingInterface({ marketId }: TradingInterfaceProps) {
-  const { address } = useAccount();
-  const [userMu, setUserMu] = useState(0);
-  const [userSigma, setUserSigma] = useState(0);
+  const { address, chainId } = useAccount();
   const [resolutionValue, setResolutionValue] = useState(0);
+  const [userMu, setUserMu] = useState<number | null>(null);
+  const [userSigma, setUserSigma] = useState<number | null>(null);
 
   const { data: marketData, isLoading: marketLoading } = useScaffoldReadContract({
     contractName: "DistributionMarket",
@@ -26,56 +31,78 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     args: [BigInt(marketId)],
   });
 
-  const { writeContractAsync, isPending } = useScaffoldWriteContract({
-    contractName: "DistributionMarket",
-  });
+  const { writeContractAsync, isPending } = useWriteContract();
 
   const marketMu = marketData ? Number(marketData[0]) / SCALE : 3200;
   const marketSigma = marketData ? Number(marketData[1]) / SCALE : 400;
   const b = marketData ? Number(marketData[2]) / SCALE : 0.01;
   const k = marketData ? Number(marketData[3]) / SCALE : computeKFromGaussian(b, marketSigma);
+  const sigmaMin = calcSigmaMin(k, b);
 
-  const sigmaMin = useMemo(() => {
-    if (k <= 0 || b <= 0) return 0;
-    return (k * k) / (b * b * Math.sqrt(Math.PI));
-  }, [k, b]);
+  useEffect(() => {
+    if (userMu === null) setUserMu(marketMu);
+    if (userSigma === null && sigmaMin > 0) setUserSigma(Math.ceil(sigmaMin) + 1);
+  }, [marketMu, sigmaMin, userMu, userSigma]);
+
+  const mu = userMu ?? marketMu;
+  const sigma = userSigma ?? Math.ceil(sigmaMin) + 1;
 
   const collateral = useMemo(() => {
-    if (userSigma <= 0 || userMu <= 0) return 0;
-    return computeCollateral(k, marketMu, marketSigma, userMu, userSigma);
-  }, [k, marketMu, marketSigma, userMu, userSigma]);
+    if (sigma <= 0 || mu <= 0) return 0;
+    return computeCollateral(k, marketMu, marketSigma, mu, sigma);
+  }, [k, marketMu, marketSigma, mu, sigma]);
 
   const { total: totalEthToSend } = useMemo(() => {
     if (collateral <= 0) return { total: 0, fees: 0 };
-    return computeTotalToSend(collateral, userSigma);
-  }, [collateral, userSigma]);
+    return computeTotalToSend(collateral, sigma);
+  }, [collateral, sigma]);
 
   const payoutPreview = useMemo(() => {
     if (resolutionValue <= 0 || collateral <= 0) return 0;
     const prevScaled = scaledPDF(resolutionValue, marketMu, marketSigma, k);
-    const tradeScaled = scaledPDF(resolutionValue, userMu, userSigma, k);
+    const tradeScaled = scaledPDF(resolutionValue, mu, sigma, k);
     const pnl = tradeScaled - prevScaled;
     return Math.max(0, Math.min(collateral + pnl, collateral * 10));
-  }, [resolutionValue, collateral, marketMu, marketSigma, userMu, userSigma, k]);
+  }, [resolutionValue, collateral, marketMu, marketSigma, mu, sigma, k]);
 
   const handleTrade = async () => {
-    if (!address) {
+    if (!address || !chainId) {
       notification.error("Connect your wallet first");
       return;
     }
-    if (userSigma < sigmaMin) {
+    if (sigma < sigmaMin) {
       notification.error("Sigma below minimum");
       return;
     }
+    if (totalEthToSend <= 0) {
+      notification.error("Invalid collateral amount");
+      return;
+    }
+
     try {
-      await writeContractAsync({
+      const hash = await writeContractAsync({
+        address: "0x5FbDB2315678afecb367f032d93F642f64180aa3" as `0x${string}`,
+        abi: [
+          {
+            type: "function",
+            name: "trade",
+            inputs: [
+              { name: "marketId", type: "uint256", internalType: "uint256" },
+              { name: "mu", type: "int256", internalType: "int256" },
+              { name: "sigma", type: "uint256", internalType: "uint256" },
+            ],
+            outputs: [],
+            stateMutability: "payable",
+          },
+        ],
         functionName: "trade",
-        args: [BigInt(marketId), BigInt(Math.round(userMu * SCALE)), BigInt(Math.round(userSigma * SCALE))],
+        args: [BigInt(marketId), BigInt(Math.round(mu * SCALE)), BigInt(Math.round(sigma * SCALE))],
         value: parseEther(totalEthToSend.toFixed(18)),
       });
-      notification.success("Trade executed!");
+      notification.success("Trade sent! Hash: " + hash.slice(0, 10) + "...");
     } catch (e: any) {
-      notification.error(e.message || "Trade failed");
+      const msg = e?.shortMessage || e?.message || "Trade failed";
+      notification.error(msg);
     }
   };
 
@@ -111,14 +138,14 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Your Predicted Mean (μ): <span className="text-primary">${userMu.toLocaleString()}</span>
+                Your Predicted Mean (μ): <span className="text-primary">${mu.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
               min={Math.round(marketMu * 0.5)}
               max={Math.round(marketMu * 1.5)}
-              value={userMu}
+              value={mu}
               step={1}
               onChange={e => setUserMu(Number(e.target.value))}
               className="range range-primary w-full"
@@ -128,19 +155,19 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Your Confidence (σ): <span className="text-secondary">{userSigma.toLocaleString()}</span>
+                Your Confidence (σ): <span className="text-secondary">{sigma.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
               min={Math.max(Math.round(sigmaMin), 1)}
               max={Math.round(marketSigma * 3)}
-              value={userSigma}
+              value={sigma}
               step={1}
               onChange={e => setUserSigma(Number(e.target.value))}
               className="range range-secondary w-full"
             />
-            {userSigma > 0 && userSigma < sigmaMin && (
+            {sigma < sigmaMin && (
               <p className="text-error text-sm mt-1">σ below minimum. Increase your confidence width.</p>
             )}
           </div>
@@ -179,12 +206,14 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           <button
             className="btn btn-primary w-full"
             onClick={handleTrade}
-            disabled={isPending || userSigma <= 0 || userSigma < sigmaMin}
+            disabled={isPending || sigma <= 0 || sigma < sigmaMin || totalEthToSend <= 0}
           >
-            {isPending ? "Trading..." : "Execute Trade"}
+            {isPending ? "Confirm in wallet..." : "Execute Trade"}
           </button>
         </div>
       </div>
     </div>
   );
 }
+
+
