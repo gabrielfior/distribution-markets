@@ -6,9 +6,4 @@ solc = "0.8.20"
 evm_version = "paris"
 
 [rpc_endpoints]
-gnosis = "https://rpc.gnosischain.com"
-gnosisChiado = "https://rpc.chiadochain.net"
-
-[etherscan]
-gnosis = { key = "${GNOSISSCAN_API_KEY}", url = "https://api.gnosisscan.io/api" }
-gnosisChiado = { key = "${GNOSISSCAN_API_KEY}", url = "https://blockscout.chiadochain.net/api" }
+localhost = "http://127.0.0.1:8545"
