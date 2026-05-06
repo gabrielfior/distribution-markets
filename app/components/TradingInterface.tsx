@@ -104,8 +104,6 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     }
   };
 
-  if (isLoading) return <div className="text-center p-8">Loading market...</div>;
-
   const userChangedMu = mu !== currentMu;
   const userChangedSigma = sigma !== currentSigma;
   const showUserPreview = userChangedMu || userChangedSigma;
@@ -129,6 +127,8 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     collateral: collateral,
     k: k,
   }], [mu, sigma, currentMu, currentSigma, collateral, k]);
+
+  if (isLoading) return <div className="text-center p-8">Loading market...</div>;
 
   return (
     <div className="space-y-6">
