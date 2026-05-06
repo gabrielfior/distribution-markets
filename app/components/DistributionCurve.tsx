@@ -1,109 +1,105 @@
 "use client";
 
 import { useMemo } from "react";
-import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { scaledPDF } from "~~/utils/distributionMath";
 
-interface DistributionCurveProps {
-  marketMu: number;
-  marketSigma: number;
+const DIST_COLORS = ["#34495e", "#e74c3c", "#2ecc71", "#3498db", "#9b59b6", "#f39c12", "#1abc9c"];
+
+interface CurveData {
+  initialMu: number;
+  initialSigma: number;
+  currentMu: number;
+  currentSigma: number;
   userMu?: number;
   userSigma?: number;
-  actualPrice?: number;
-  height?: number;
+  k: number;
 }
 
-function normalPDF(x: number, mu: number, sigma: number): number {
-  if (sigma <= 0) return 0;
-  const coeff = 1 / (sigma * Math.sqrt(2 * Math.PI));
-  const exponent = -0.5 * Math.pow((x - mu) / sigma, 2);
-  return coeff * Math.exp(exponent);
-}
-
-export default function DistributionCurve({
-  marketMu,
-  marketSigma,
-  userMu,
-  userSigma,
-  actualPrice,
-  height = 250,
-}: DistributionCurveProps) {
-  const data = useMemo(() => {
-    // Determine the unified x range
-    const allMus = [marketMu];
-    const allSigmas = [marketSigma];
-    if (userMu !== undefined && userSigma !== undefined) {
-      allMus.push(userMu);
-      allSigmas.push(userSigma);
+export default function DistributionCurve({ data, height = 400 }: { data: CurveData; height?: number }) {
+  const { chartData, config } = useMemo(() => {
+    const allMus = [data.initialMu, data.currentMu];
+    const allSigmas = [data.initialSigma, data.currentSigma];
+    if (data.userMu !== undefined && data.userSigma !== undefined) {
+      allMus.push(data.userMu);
+      allSigmas.push(data.userSigma);
     }
-
     const minMu = Math.min(...allMus);
     const maxMu = Math.max(...allMus);
-    const maxSigma = Math.max(...allSigmas);
+    const maxSig = Math.max(...allSigmas);
+    const xMin = minMu - 4 * maxSig - 2;
+    const xMax = maxMu + 4 * maxSig + 2;
+    const step = (xMax - xMin) / 300;
 
-    const xMin = minMu - 3.5 * maxSigma;
-    const xMax = maxMu + 3.5 * maxSigma;
-    const step = (xMax - xMin) / 200;
-
-    const points = [];
+    const points: Record<string, number>[] = [];
     for (let x = xMin; x <= xMax; x += step) {
-      points.push({
-        x: Math.round(x),
-        market: normalPDF(x, marketMu, marketSigma),
-        user: userMu !== undefined && userSigma !== undefined ? normalPDF(x, userMu, userSigma) : 0,
-      });
+      const p: Record<string, number> = { x: Math.round(x) };
+      p["Initial f₀"] = scaledPDF(x, data.initialMu, data.initialSigma, data.k);
+      p["Current market"] = scaledPDF(x, data.currentMu, data.currentSigma, data.k);
+      if (data.userMu !== undefined && data.userSigma !== undefined) {
+        p["Your prediction"] = scaledPDF(x, data.userMu, data.userSigma, data.k);
+      }
+      points.push(p);
     }
-    return points;
-  }, [marketMu, marketSigma, userMu, userSigma]);
 
-  const hasUserDist = userMu !== undefined && userSigma !== undefined;
+    const cols: { key: string; color: string; dash?: string }[] = [
+      { key: "Initial f₀", color: DIST_COLORS[0], dash: "5 5" },
+      { key: "Current market", color: "#8884d8" },
+    ];
+    if (data.userMu !== undefined && data.userSigma !== undefined) {
+      cols.push({ key: "Your prediction", color: DIST_COLORS[1], dash: "5 5" });
+    }
+
+    return { chartData: points, config: cols };
+  }, [data]);
 
   return (
-    <div className="w-full bg-base-200 rounded-lg p-4" style={{ height }}>
+    <div className="bg-base-200 rounded-lg p-4" style={{ height }}>
+      <h4 className="text-sm font-bold mb-2 text-base-content/70">Distributions</h4>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+        <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
           <XAxis
             dataKey="x"
             type="number"
             domain={["auto", "auto"]}
-            tick={{ fontSize: 12 }}
-            tickFormatter={val => `$${val.toLocaleString()}`}
+            tick={{ fontSize: 11 }}
+            tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
           />
           <YAxis hide domain={[0, "auto"]} />
           <Tooltip
-            formatter={value => (typeof value === "number" ? value.toExponential(2) : value)}
-            labelFormatter={label => `Price: $${Number(label).toLocaleString()}`}
+            formatter={(value: number) => value.toFixed(4)}
+            labelFormatter={label => `x = $${Number(label).toLocaleString()}`}
           />
-          <Line
-            type="monotone"
-            dataKey="market"
-            stroke="#8884d8"
-            strokeWidth={3}
-            dot={false}
-            name="Market consensus"
-            isAnimationActive={false}
+          <Legend
+            verticalAlign="bottom"
+            height={36}
+            wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }}
           />
-          {hasUserDist && (
-            <Line
+          {config.map(c => (
+            <Area
+              key={c.key}
               type="monotone"
-              dataKey="user"
-              stroke="#82ca9d"
-              strokeWidth={3}
+              dataKey={c.key}
+              stroke={c.color}
+              strokeWidth={2}
+              strokeDasharray={c.dash}
+              fill={c.color}
+              fillOpacity={0.04}
               dot={false}
-              strokeDasharray="5 5"
-              name="Your prediction"
               isAnimationActive={false}
             />
-          )}
-          {actualPrice && (
-            <ReferenceLine
-              x={actualPrice}
-              stroke="#ef4444"
-              strokeWidth={2}
-              strokeDasharray="3 3"
-              label={{ value: "Outcome", position: "top", fill: "#ef4444", fontSize: 12 }}
-            />
-          )}
-        </LineChart>
+          ))}
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );

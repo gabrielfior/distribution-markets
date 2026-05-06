@@ -52,7 +52,7 @@ contract DistributionMarketTest is Test {
     function testCreateMarket() external {
         uint256 mid = _createMarket();
 
-        (int256 cmu, uint256 csig, uint256 bVal, uint256 kVal, bool res,) = market.getMarketSimple(mid);
+        (int256 cmu, uint256 csig, uint256 bVal, uint256 kVal, bool res,,,) = market.getMarketSimple(mid);
         assertFalse(res);
         assertEq(cmu, MU_0);
         assertEq(csig, SIGMA_0);
@@ -83,7 +83,7 @@ contract DistributionMarketTest is Test {
         vm.prank(alice);
         market.trade{ value: totalSend }(mid, tradeMu, tradeSigma);
 
-        (int256 cmu, uint256 csig,,, bool res,) = market.getMarketSimple(mid);
+        (int256 cmu, uint256 csig,,, bool res,,,) = market.getMarketSimple(mid);
         assertFalse(res);
         assertEq(cmu, tradeMu, "market mu should update");
         assertEq(csig, tradeSigma, "market sigma should update");
@@ -129,7 +129,7 @@ contract DistributionMarketTest is Test {
         vm.prank(bob);
         market.trade{ value: send }(mid, 3100e18, tradeSigma);
 
-        (int256 cmu,,,,,) = market.getMarketSimple(mid);
+        (int256 cmu,,,,,,,) = market.getMarketSimple(mid);
         assertEq(cmu, 3100e18, "market mu should reflect bob's trade");
         assertEq(market.getTradeCount(mid), 2);
     }
@@ -142,7 +142,7 @@ contract DistributionMarketTest is Test {
         vm.warp(block.timestamp + END_TIME + 1);
         market.resolve(mid, 3250e18);
 
-        (,,,, bool res, int256 outcome) = market.getMarketSimple(mid);
+        (,,,, bool res, int256 outcome,,) = market.getMarketSimple(mid);
         assertTrue(res);
         assertEq(outcome, 3250e18);
     }

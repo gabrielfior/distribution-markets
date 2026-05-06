@@ -266,10 +266,12 @@ contract DistributionMarket {
         uint256 b,
         uint256 k,
         bool resolved,
-        int256 outcome
+        int256 outcome,
+        int256 initialMu,
+        uint256 initialSigma
     ) {
         Market storage m = markets[marketId];
-        return (m.currentMu, m.currentSigma, m.b, m.k, m.resolved, m.outcome);
+        return (m.currentMu, m.currentSigma, m.b, m.k, m.resolved, m.outcome, m.initialMu, m.initialSigma);
     }
 
     function getMarketB(uint256 marketId) external view returns (uint256) {

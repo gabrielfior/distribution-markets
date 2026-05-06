@@ -5,8 +5,9 @@ import { parseEther } from "viem";
 import { useAccount, useWriteContract } from "wagmi";
 import { useScaffoldReadContract } from "~~/hooks/scaffold-eth";
 import { notification } from "~~/utils/scaffold-eth";
+import { computeCollateral, computeTotalToSend } from "~~/utils/distributionMath";
 import DistributionCurve from "./DistributionCurve";
-import { computeCollateral, computeTotalToSend, scaledPDF, computeKFromGaussian } from "~~/utils/distributionMath";
+import PayoutChart from "./PayoutChart";
 
 interface TradingInterfaceProps {
   marketId: string;
@@ -25,7 +26,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
   const [userMu, setUserMu] = useState<number | null>(null);
   const [userSigma, setUserSigma] = useState<number | null>(null);
 
-  const { data: marketData, isLoading: marketLoading } = useScaffoldReadContract({
+  const { data: marketData, isLoading } = useScaffoldReadContract({
     contractName: "DistributionMarket",
     functionName: "getMarketSimple",
     args: [BigInt(marketId)],
@@ -33,37 +34,33 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
 
   const { writeContractAsync, isPending } = useWriteContract();
 
-  const marketMu = marketData ? Number(marketData[0]) / SCALE : 3200;
-  const marketSigma = marketData ? Number(marketData[1]) / SCALE : 400;
+  const initialMu = marketData ? Number(marketData[6]) / SCALE : 3200;
+  const initialSigma = marketData ? Number(marketData[7]) / SCALE : 400;
+  const currentMu = marketData ? Number(marketData[0]) / SCALE : 3200;
+  const currentSigma = marketData ? Number(marketData[1]) / SCALE : 400;
   const b = marketData ? Number(marketData[2]) / SCALE : 0.01;
-  const k = marketData ? Number(marketData[3]) / SCALE : computeKFromGaussian(b, marketSigma);
+  const k = marketData ? Number(marketData[3]) / SCALE : 0.997;
+  const resolved = marketData ? marketData[4] : false;
+  const outcome = marketData ? Number(marketData[5]) / SCALE : 0;
   const sigmaMin = calcSigmaMin(k, b);
 
   useEffect(() => {
-    if (userMu === null) setUserMu(marketMu);
-    if (userSigma === null && sigmaMin > 0) setUserSigma(Math.ceil(sigmaMin) + 1);
-  }, [marketMu, sigmaMin, userMu, userSigma]);
+    if (userMu === null) setUserMu(currentMu || initialMu);
+    if (userSigma === null && sigmaMin > 0) setUserSigma(Math.max(Math.ceil(sigmaMin) + 1, Math.ceil(currentSigma * 0.8)));
+  }, [currentMu, initialMu, currentSigma, sigmaMin, userMu, userSigma]);
 
-  const mu = userMu ?? marketMu;
-  const sigma = userSigma ?? Math.ceil(sigmaMin) + 1;
+  const mu = userMu ?? currentMu;
+  const sigma = userSigma ?? Math.max(Math.ceil(sigmaMin) + 1, Math.ceil(currentSigma * 0.8));
 
   const collateral = useMemo(() => {
-    if (sigma <= 0 || mu <= 0) return 0;
-    return computeCollateral(k, marketMu, marketSigma, mu, sigma);
-  }, [k, marketMu, marketSigma, mu, sigma]);
+    if (sigma <= 0 || mu <= 0 || k <= 0) return 0;
+    return computeCollateral(k, currentMu, currentSigma, mu, sigma);
+  }, [k, currentMu, currentSigma, mu, sigma]);
 
   const { total: totalEthToSend } = useMemo(() => {
     if (collateral <= 0) return { total: 0, fees: 0 };
     return computeTotalToSend(collateral, sigma);
   }, [collateral, sigma]);
-
-  const payoutPreview = useMemo(() => {
-    if (resolutionValue <= 0 || collateral <= 0) return 0;
-    const prevScaled = scaledPDF(resolutionValue, marketMu, marketSigma, k);
-    const tradeScaled = scaledPDF(resolutionValue, mu, sigma, k);
-    const pnl = tradeScaled - prevScaled;
-    return Math.max(0, Math.min(collateral + pnl, collateral * 10));
-  }, [resolutionValue, collateral, marketMu, marketSigma, mu, sigma, k]);
 
   const handleTrade = async () => {
     if (!address || !chainId) {
@@ -78,10 +75,9 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
       notification.error("Invalid collateral amount");
       return;
     }
-
     try {
       const hash = await writeContractAsync({
-        address: "0x5FbDB2315678afecb367f032d93F642f64180aa3" as `0x${string}`,
+        address: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0" as `0x${string}`,
         abi: [
           {
             type: "function",
@@ -99,18 +95,49 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
         args: [BigInt(marketId), BigInt(Math.round(mu * SCALE)), BigInt(Math.round(sigma * SCALE))],
         value: parseEther(totalEthToSend.toFixed(18)),
       });
-      notification.success("Trade sent! Hash: " + hash.slice(0, 10) + "...");
+      notification.success("Trade sent!");
     } catch (e: any) {
-      const msg = e?.shortMessage || e?.message || "Trade failed";
-      notification.error(msg);
+      notification.error(e?.shortMessage || e?.message || "Trade failed");
     }
   };
 
-  if (marketLoading) return <div className="text-center p-8">Loading market...</div>;
+  if (isLoading) return <div className="text-center p-8">Loading market...</div>;
+
+  const previewTrade = {
+    label: `Your trade (μ=${mu.toFixed(0)}, σ=${sigma.toFixed(0)})`,
+    prevMu: currentMu,
+    prevSigma: currentSigma,
+    tradeMu: mu,
+    tradeSigma: sigma,
+    collateral: collateral,
+    k: k,
+  };
 
   return (
     <div className="space-y-6">
-      <DistributionCurve marketMu={marketMu} marketSigma={marketSigma} height={300} />
+      <h2 className="text-2xl font-bold">Market Visualization</h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <DistributionCurve
+          data={{
+            initialMu,
+            initialSigma,
+            currentMu,
+            currentSigma,
+            userMu: mu !== currentMu ? mu : undefined,
+            userSigma: sigma !== currentSigma ? sigma : undefined,
+            k,
+          }}
+          height={400}
+        />
+        <PayoutChart
+          trades={[previewTrade]}
+          currentMu={currentMu}
+          currentSigma={currentSigma}
+          k={k}
+          height={400}
+        />
+      </div>
 
       <div className="bg-base-200 p-6 rounded-lg">
         <h3 className="text-lg font-bold mb-4">Trade</h3>
@@ -118,11 +145,11 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
         <div className="stats shadow mb-4 w-full">
           <div className="stat">
             <div className="stat-title">Market μ</div>
-            <div className="stat-value text-lg">${marketMu.toLocaleString()}</div>
+            <div className="stat-value text-lg">${currentMu.toLocaleString()}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Market σ</div>
-            <div className="stat-value text-lg">{marketSigma.toLocaleString()}</div>
+            <div className="stat-value text-lg">{currentSigma.toLocaleString()}</div>
           </div>
           <div className="stat">
             <div className="stat-title">Min σ</div>
@@ -138,13 +165,13 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Your Predicted Mean (μ): <span className="text-primary">${mu.toLocaleString()}</span>
+                Expected Price (μ): <span className="text-primary">${mu.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
-              min={Math.round(marketMu * 0.5)}
-              max={Math.round(marketMu * 1.5)}
+              min={Math.round(currentMu * 0.5)}
+              max={Math.round(currentMu * 1.5)}
               value={mu}
               step={1}
               onChange={e => setUserMu(Number(e.target.value))}
@@ -155,53 +182,33 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Your Confidence (σ): <span className="text-secondary">{sigma.toLocaleString()}</span>
+                Confidence (σ): <span className="text-secondary">{sigma.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
               min={Math.max(Math.round(sigmaMin), 1)}
-              max={Math.round(marketSigma * 3)}
+              max={Math.round(currentSigma * 3)}
               value={sigma}
               step={1}
               onChange={e => setUserSigma(Number(e.target.value))}
               className="range range-secondary w-full"
             />
             {sigma < sigmaMin && (
-              <p className="text-error text-sm mt-1">σ below minimum. Increase your confidence width.</p>
+              <p className="text-error text-sm mt-1">σ below minimum. Increase width.</p>
             )}
           </div>
 
-          <div className="p-4 bg-base-100 rounded-lg space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span>Collateral Required:</span>
-              <span className="font-mono font-medium">{collateral.toFixed(6)} ETH</span>
+          <div className="flex justify-between items-center p-4 bg-base-100 rounded-lg">
+            <div>
+              <div className="text-sm text-base-content/60">Collateral Required</div>
+              <div className="font-mono font-bold text-lg">{collateral.toFixed(6)} ETH</div>
             </div>
-            <div className="flex justify-between">
-              <span>Total to Send:</span>
-              <span className="font-mono font-bold text-primary">{totalEthToSend.toFixed(6)} ETH</span>
+            <div className="text-right">
+              <div className="text-sm text-base-content/60">Total to Send</div>
+              <div className="font-mono font-bold text-lg text-primary">{totalEthToSend.toFixed(6)} ETH</div>
             </div>
           </div>
-
-          {resolutionValue > 0 && (
-            <div className="p-4 bg-base-100 rounded-lg">
-              <label className="label">
-                <span className="label-text font-medium">Resolution Outcome Preview</span>
-              </label>
-              <input
-                type="range"
-                min={Math.round(marketMu * 0.5)}
-                max={Math.round(marketMu * 1.5)}
-                value={resolutionValue}
-                step={1}
-                onChange={e => setResolutionValue(Number(e.target.value))}
-                className="range range-accent w-full"
-              />
-              <p className="text-sm mt-2">
-                Hypothetical payout: <span className="font-bold font-mono">{payoutPreview.toFixed(6)} ETH</span>
-              </p>
-            </div>
-          )}
 
           <button
             className="btn btn-primary w-full"
@@ -212,8 +219,12 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           </button>
         </div>
       </div>
+
+      {resolved && (
+        <div className="alert alert-success">
+          <span>Resolved at {outcome}</span>
+        </div>
+      )}
     </div>
   );
 }
-
-
