@@ -7,3 +7,4 @@ evm_version = "paris"
 
 [rpc_endpoints]
 localhost = "http://127.0.0.1:8545"
+tenderly = "https://virtual.polygon.eu.rpc.tenderly.co/5f02cc89-4f33-4376-ae33-96831393c9f1"

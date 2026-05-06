@@ -1,4 +1,16 @@
+import { defineChain } from "viem";
 import * as chains from "viem/chains";
+
+export const tenderlyVirtualTestnet = defineChain({
+  id: 999137,
+  name: "Tenderly Polygon Virtual Testnet",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: {
+      http: ["https://virtual.polygon.eu.rpc.tenderly.co/5f02cc89-4f33-4376-ae33-96831393c9f1"],
+    },
+  },
+});
 
 export type BaseConfig = {
   targetNetworks: readonly chains.Chain[];
@@ -14,7 +26,7 @@ export type ScaffoldConfig = BaseConfig;
 export const DEFAULT_ALCHEMY_API_KEY = "cR4WnXePioePZ5fFrnSiR";
 
 const scaffoldConfig = {
-  targetNetworks: [chains.hardhat],
+  targetNetworks: [tenderlyVirtualTestnet, chains.hardhat],
   pollingInterval: 5000,
   alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || DEFAULT_ALCHEMY_API_KEY,
   rpcOverrides: {},
