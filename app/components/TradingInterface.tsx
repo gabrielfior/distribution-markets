@@ -2,8 +2,8 @@
 
 import { useEffect, useDeferredValue, useMemo, useState } from "react";
 import { parseEther } from "viem";
-import { useAccount, useWriteContract } from "wagmi";
-import { useScaffoldReadContract } from "~~/hooks/scaffold-eth";
+import { useAccount, useReadContracts, useWriteContract } from "wagmi";
+import { useDeployedContractInfo, useScaffoldReadContract } from "~~/hooks/scaffold-eth";
 import { notification } from "~~/utils/scaffold-eth";
 import { computeCollateral, computeTotalToSend } from "~~/utils/distributionMath";
 import DistributionCurve from "./DistributionCurve";
@@ -14,6 +14,7 @@ interface TradingInterfaceProps {
 }
 
 const SCALE = 1e18;
+const TRADE_COLORS = ["#e74c3c", "#2ecc71", "#3498db", "#9b59b6", "#f39c12", "#1abc9c", "#e67e22", "#34495e"];
 
 function calcSigmaMin(k: number, b: number): number {
   if (k <= 0 || b <= 0) return 0;
@@ -22,14 +23,53 @@ function calcSigmaMin(k: number, b: number): number {
 
 export default function TradingInterface({ marketId }: TradingInterfaceProps) {
   const { address, chainId } = useAccount();
-  const [resolutionValue, setResolutionValue] = useState(0);
   const [userMu, setUserMu] = useState<number | null>(null);
   const [userSigma, setUserSigma] = useState<number | null>(null);
+
+  const { data: contractInfo } = useDeployedContractInfo({ contractName: "DistributionMarket" });
+  const contractAddress = contractInfo?.address;
 
   const { data: marketData, isLoading } = useScaffoldReadContract({
     contractName: "DistributionMarket",
     functionName: "getMarketSimple",
     args: [BigInt(marketId)],
+  });
+
+  const { data: tradeCountData } = useScaffoldReadContract({
+    contractName: "DistributionMarket",
+    functionName: "getTradeCount",
+    args: [BigInt(marketId)],
+  });
+
+  const tradeCount = tradeCountData ? Number(tradeCountData) : 0;
+  const tradeIndices = useMemo(() => Array.from({ length: tradeCount }, (_, i) => i), [tradeCount]);
+
+  const { data: tradesBatch } = useReadContracts({
+    contracts: tradeIndices.map(i => ({
+      address: contractAddress!,
+      abi: [{
+        type: "function" as const,
+        name: "getTrade",
+        inputs: [
+          { name: "marketId", type: "uint256", internalType: "uint256" },
+          { name: "tradeIndex", type: "uint256", internalType: "uint256" },
+        ],
+        outputs: [
+          { name: "trader", type: "address", internalType: "address" },
+          { name: "prevMu", type: "int256", internalType: "int256" },
+          { name: "prevSigma", type: "uint256", internalType: "uint256" },
+          { name: "tradeMu", type: "int256", internalType: "int256" },
+          { name: "tradeSigma", type: "uint256", internalType: "uint256" },
+          { name: "collateral", type: "uint256", internalType: "uint256" },
+          { name: "feePaid", type: "uint256", internalType: "uint256" },
+          { name: "claimed", type: "bool", internalType: "bool" },
+        ],
+        stateMutability: "view",
+      }],
+      functionName: "getTrade",
+      args: [BigInt(marketId), BigInt(0)],
+    })),
+    query: { enabled: tradeCount > 0 && !!contractAddress },
   });
 
   const { writeContractAsync, isPending } = useWriteContract();
@@ -43,6 +83,28 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
   const resolved = marketData ? marketData[4] : false;
   const outcome = marketData ? Number(marketData[5]) / SCALE : 0;
   const sigmaMin = calcSigmaMin(k, b);
+
+  const pastTrades = useMemo(() => {
+    if (!tradesBatch || tradesBatch.length === 0) return [];
+    return tradesBatch.map((r, i) => {
+      if (!r.result) return null;
+      const d = r.result as readonly [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean];
+      return {
+        index: i,
+        trader: d[0],
+        prevMu: Number(d[1]) / SCALE,
+        prevSigma: Number(d[2]) / SCALE,
+        tradeMu: Number(d[3]) / SCALE,
+        tradeSigma: Number(d[4]) / SCALE,
+        collateral: Number(d[5]) / SCALE,
+        feePaid: Number(d[6]) / SCALE,
+        claimed: d[7],
+      };
+    }).filter(Boolean) as {
+      index: number; trader: string; prevMu: number; prevSigma: number;
+      tradeMu: number; tradeSigma: number; collateral: number; feePaid: number; claimed: boolean;
+    }[];
+  }, [tradesBatch]);
 
   useEffect(() => {
     if (!marketData) return;
@@ -65,6 +127,52 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     return computeTotalToSend(collateral, sigmaRaw);
   }, [collateral, sigmaRaw]);
 
+  const userChangedMu = mu !== currentMu;
+  const userChangedSigma = sigma !== currentSigma;
+  const showUserPreview = userChangedMu || userChangedSigma;
+
+  const curveData = useMemo(() => ({
+    initialMu,
+    initialSigma,
+    currentMu,
+    currentSigma,
+    userMu: showUserPreview ? mu : undefined,
+    userSigma: showUserPreview ? sigma : undefined,
+    k,
+    pastTrades: pastTrades.map((t, i) => ({
+      mu: t.tradeMu,
+      sigma: t.tradeSigma,
+      label: `Trade #${t.index + 1}`,
+      color: TRADE_COLORS[(t.index + 1) % TRADE_COLORS.length],
+    })),
+  }), [initialMu, initialSigma, currentMu, currentSigma, mu, sigma, k, showUserPreview, pastTrades]);
+
+  const previewTrades = useMemo(() => {
+    const result: {
+      label: string; prevMu: number; prevSigma: number;
+      tradeMu: number; tradeSigma: number; collateral: number; k: number;
+    }[] = [];
+
+    if (showUserPreview) {
+      result.push({
+        label: `Your trade (μ=${mu.toFixed(0)}, σ=${sigma.toFixed(0)})`,
+        prevMu: currentMu, prevSigma: currentSigma,
+        tradeMu: mu, tradeSigma: sigma, collateral, k,
+      });
+    }
+
+    pastTrades.forEach(t => {
+      result.push({
+        label: `Trade #${t.index + 1} (μ=${t.tradeMu.toFixed(0)}, σ=${t.tradeSigma.toFixed(0)})`,
+        prevMu: t.prevMu, prevSigma: t.prevSigma,
+        tradeMu: t.tradeMu, tradeSigma: t.tradeSigma,
+        collateral: t.collateral, k,
+      });
+    });
+
+    return result;
+  }, [pastTrades, showUserPreview, mu, sigma, currentMu, currentSigma, collateral, k]);
+
   const handleTrade = async () => {
     if (!address || !chainId) {
       notification.error("Connect your wallet first");
@@ -80,20 +188,16 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     }
     try {
       const hash = await writeContractAsync({
-        address: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0" as `0x${string}`,
-        abi: [
-          {
-            type: "function",
-            name: "trade",
-            inputs: [
-              { name: "marketId", type: "uint256", internalType: "uint256" },
-              { name: "mu", type: "int256", internalType: "int256" },
-              { name: "sigma", type: "uint256", internalType: "uint256" },
-            ],
-            outputs: [],
-            stateMutability: "payable",
-          },
-        ],
+        address: contractAddress!,
+        abi: [{
+          type: "function" as const, name: "trade",
+          inputs: [
+            { name: "marketId", type: "uint256", internalType: "uint256" },
+            { name: "mu", type: "int256", internalType: "int256" },
+            { name: "sigma", type: "uint256", internalType: "uint256" },
+          ],
+          outputs: [], stateMutability: "payable",
+        }],
         functionName: "trade",
         args: [BigInt(marketId), BigInt(Math.round(mu * SCALE)), BigInt(Math.round(sigma * SCALE))],
         value: parseEther(totalEthToSend.toFixed(18)),
@@ -103,30 +207,6 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
       notification.error(e?.shortMessage || e?.message || "Trade failed");
     }
   };
-
-  const userChangedMu = mu !== currentMu;
-  const userChangedSigma = sigma !== currentSigma;
-  const showUserPreview = userChangedMu || userChangedSigma;
-
-  const curveData = useMemo(() => ({
-    initialMu,
-    initialSigma,
-    currentMu,
-    currentSigma,
-    userMu: showUserPreview ? mu : undefined,
-    userSigma: showUserPreview ? sigma : undefined,
-    k,
-  }), [initialMu, initialSigma, currentMu, currentSigma, mu, sigma, k, showUserPreview]);
-
-  const previewTrades = useMemo(() => [{
-    label: `Your trade (μ=${mu.toFixed(0)}, σ=${sigma.toFixed(0)})`,
-    prevMu: currentMu,
-    prevSigma: currentSigma,
-    tradeMu: mu,
-    tradeSigma: sigma,
-    collateral: collateral,
-    k: k,
-  }], [mu, sigma, currentMu, currentSigma, collateral, k]);
 
   if (isLoading) return <div className="text-center p-8">Loading market...</div>;
 
@@ -138,6 +218,43 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
         <DistributionCurve data={curveData} height={400} />
         <PayoutChart trades={previewTrades} k={k} height={400} />
       </div>
+
+      {pastTrades.length > 0 && (
+        <div className="bg-base-200 p-6 rounded-lg">
+          <h3 className="text-lg font-bold mb-4">Trade History ({pastTrades.length})</h3>
+          <div className="overflow-x-auto">
+            <table className="table table-zebra text-sm w-full">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Prev μ</th>
+                  <th>Prev σ</th>
+                  <th>Trade μ</th>
+                  <th>Trade σ</th>
+                  <th>Collateral</th>
+                  <th>Fee</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pastTrades.map(t => (
+                  <tr key={t.index}>
+                    <td>{t.index + 1}</td>
+                    <td>{t.prevMu.toFixed(0)}</td>
+                    <td>{t.prevSigma.toFixed(1)}</td>
+                    <td className="font-medium">{t.tradeMu.toFixed(0)}</td>
+                    <td>{t.tradeSigma.toFixed(1)}</td>
+                    <td>{t.collateral.toFixed(6)} ETH</td>
+                    <td>{t.feePaid.toFixed(6)} ETH</td>
+                    <td>{t.claimed ? <span className="badge badge-success badge-sm">Claimed</span> :
+                      <span className="badge badge-ghost badge-sm">Open</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="bg-base-200 p-6 rounded-lg">
         <h3 className="text-lg font-bold mb-4">Trade</h3>
