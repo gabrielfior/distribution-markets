@@ -55,18 +55,24 @@ function buildPayout(trades: TradePreview[], k: number) {
     points.push(p);
   }
   const yPad = Math.max(Math.abs(maxVal - minVal) * 0.1, 0.001);
+  const yLow = minVal === Infinity ? -1 : minVal - yPad;
+  const yHigh = maxVal === -Infinity ? 1 : maxVal + yPad;
   return {
     chartData: points,
     xDomain: [xMin, xMax] as [number, number],
-    yDomain: [minVal - yPad, maxVal + yPad] as [number, number],
+    yDomain: [yLow, yHigh] as [number, number],
   };
 }
 
 const PayoutChart = memo(function PayoutChart({ trades, k, height = 400 }: PayoutChartProps) {
   const { chartData, xDomain, yDomain } = useMemo(() => buildPayout(trades, k), [trades, k]);
 
+  if (chartData.length === 0) {
+    return <div className="bg-base-200 rounded-lg p-4 flex items-center justify-center" style={{ height, minHeight: 400 }}><p className="text-base-content/50">No trades yet</p></div>;
+  }
+
   return (
-    <div className="bg-base-200 rounded-lg p-4" style={{ height }}>
+    <div className="bg-base-200 rounded-lg p-4" style={{ height, minHeight: 400 }}>
       <h4 className="text-sm font-bold mb-2 text-base-content/70">Trader Payouts (g − f)</h4>
       <ResponsiveContainer width="100%" height="100%" minHeight={400}>
         <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>

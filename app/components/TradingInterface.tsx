@@ -106,15 +106,19 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
 
   if (isLoading) return <div className="text-center p-8">Loading market...</div>;
 
+  const userChangedMu = mu !== currentMu;
+  const userChangedSigma = sigma !== currentSigma;
+  const showUserPreview = userChangedMu || userChangedSigma;
+
   const curveData = useMemo(() => ({
     initialMu,
     initialSigma,
     currentMu,
     currentSigma,
-    userMu: mu !== currentMu ? mu : undefined,
-    userSigma: sigma !== currentSigma ? sigma : undefined,
+    userMu: showUserPreview ? mu : undefined,
+    userSigma: showUserPreview ? sigma : undefined,
     k,
-  }), [initialMu, initialSigma, currentMu, currentSigma, mu, sigma, k]);
+  }), [initialMu, initialSigma, currentMu, currentSigma, mu, sigma, k, showUserPreview]);
 
   const previewTrades = useMemo(() => [{
     label: `Your trade (μ=${mu.toFixed(0)}, σ=${sigma.toFixed(0)})`,

@@ -31,15 +31,14 @@ function buildCurve(data: CurveData) {
   const xMax = maxMu + pad;
   const width = xMax - xMin;
   const step = width / 80;
-  const yPad = 0.1;
 
   const showUser = data.userMu !== undefined && data.userSigma !== undefined;
 
-  const points: Record<string, number>[] = [];
   const initLambda = data.k / (1 / Math.sqrt(2 * data.initialSigma * Math.sqrt(Math.PI)));
   const curLambda = data.k / (1 / Math.sqrt(2 * data.currentSigma * Math.sqrt(Math.PI)));
 
   let maxVal = 0;
+  const points: Record<string, number>[] = [];
   for (let x = xMin; x <= xMax; x += step) {
     const p: Record<string, number> = { x: Math.round(x) };
     const iv = initLambda * normalPDF(x, data.initialMu, data.initialSigma);
@@ -49,22 +48,25 @@ function buildCurve(data: CurveData) {
     if (showUser) {
       const uv = scaledPDF(x, data.userMu, data.userSigma, data.k);
       p["Your prediction"] = uv;
-      maxVal = Math.max(maxVal, uv);
+      maxVal = Math.max(uv, maxVal);
     }
-    maxVal = Math.max(maxVal, iv, cv);
+    maxVal = Math.max(iv, cv, maxVal);
     points.push(p);
   }
 
-  const cols = [
+  const config = [
     { key: "Initial f₀", color: DIST_COLORS[0], dash: "5 5" },
     { key: "Current market", color: "#8884d8" },
   ];
-  if (showUser) cols.push({ key: "Your prediction", color: DIST_COLORS[1], dash: "5 5" });
+  if (showUser) config.push({ key: "Your prediction", color: DIST_COLORS[1], dash: "5 5" });
 
-  return { chartData: points, config: cols, xDomain: [xMin, xMax] as [number, number], yMax: maxVal * (1 + yPad) };
+  const yMax = maxVal > 0 ? maxVal * 1.1 : 1;
+
+  return { chartData: points, config, xDomain: [xMin, xMax] as [number, number], yMax };
 }
 
 function normalPDF(x: number, mu: number, sigma: number): number {
+  if (sigma <= 0) return 0;
   const coeff = 1 / (sigma * 2.5066282746310002);
   const exponent = -0.5 * ((x - mu) / sigma) ** 2;
   return coeff * Math.exp(exponent);
@@ -73,6 +75,10 @@ function normalPDF(x: number, mu: number, sigma: number): number {
 const DistributionCurve = memo(function DistributionCurve({ data, height = 400 }: { data: CurveData; height?: number }) {
   const { chartData, config, xDomain, yMax } = useMemo(() => buildCurve(data), [data]);
 
+  if (chartData.length === 0) {
+    return <div className="bg-base-200 rounded-lg p-4 flex items-center justify-center" style={{ height, minHeight: 400 }}><p className="text-base-content/50">No data</p></div>;
+  }
+
   return (
     <div className="bg-base-200 rounded-lg p-4" style={{ height, minHeight: 400 }}>
       <h4 className="text-sm font-bold mb-2 text-base-content/70">Distributions</h4>
@@ -80,7 +86,7 @@ const DistributionCurve = memo(function DistributionCurve({ data, height = 400 }
         <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
           <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(v > 10000 ? 0 : 1)}k`} />
-          <YAxis domain={[0, yMax]} tick={{ fontSize: 11 }} tickFormatter={v => `$${v.toFixed(2)}`} />
+          <YAxis domain={[0, yMax]} width={60} tick={{ fontSize: 11 }} tickFormatter={v => `$${v.toFixed(2)}`} />
           <Tooltip
             formatter={(value: number) => value.toFixed(4)}
             labelFormatter={label => `x = $${Number(label).toLocaleString()}`}
