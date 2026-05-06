@@ -161,7 +161,7 @@ function MarketListItem({ marketId }: { marketId: number }) {
   const sigma = Number(marketData[1]) / 1e18;
   const b = Number(marketData[2]) / 1e18;
   const resolved = marketData[4];
-  const resolvedOutcome = Number(marketData[5]) / 1e18;
+
 
   return (
     <Link href={`/trade/${marketId}`} className="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow">

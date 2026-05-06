@@ -45,7 +45,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
   const tradeIndices = useMemo(() => Array.from({ length: tradeCount }, (_, i) => i), [tradeCount]);
 
   const { data: tradesBatch } = useReadContracts({
-    contracts: tradeIndices.map(i => ({
+    contracts: tradeIndices.map(idx => ({
       address: contractAddress!,
       abi: [{
         type: "function" as const,
@@ -67,7 +67,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
         stateMutability: "view",
       }],
       functionName: "getTrade",
-      args: [BigInt(marketId), BigInt(0)],
+      args: [BigInt(marketId), BigInt(idx)],
     })),
     query: { enabled: tradeCount > 0 && !!contractAddress },
   });
@@ -139,7 +139,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     userMu: showUserPreview ? mu : undefined,
     userSigma: showUserPreview ? sigma : undefined,
     k,
-    pastTrades: pastTrades.map((t, i) => ({
+    pastTrades: pastTrades.map(t => ({
       mu: t.tradeMu,
       sigma: t.tradeSigma,
       label: `Trade #${t.index + 1}`,
@@ -187,7 +187,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
       return;
     }
     try {
-      const hash = await writeContractAsync({
+      await writeContractAsync({
         address: contractAddress!,
         abi: [{
           type: "function" as const, name: "trade",
