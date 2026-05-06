@@ -22,8 +22,19 @@ interface PayoutChartProps {
   height?: number;
 }
 
+function fmtY(v: number) {
+  if (v >= 1) return "$" + v.toFixed(2);
+  if (v >= 0.001) return "$" + v.toFixed(4);
+  return "$" + v.toExponential(1);
+}
+
+function fmtX(v: number) {
+  if (v >= 1000) return "$" + (v / 1000).toFixed(v > 10000 ? 0 : 1) + "k";
+  return "$" + v.toFixed(0);
+}
+
 function buildPayout(trades: TradePreview[], k: number) {
-  if (trades.length === 0) return { chartData: [], xDomain: [0, 1] as [number, number], yDomain: [0, 1] as [number, number] };
+  if (trades.length === 0) return { chartData: [], xDomain: [0, 1] as [number, number], yDomain: [-1, 1] as [number, number] };
 
   const allPrevMu = trades.map(t => t.prevMu);
   const allTradeMu = trades.map(t => t.tradeMu);
@@ -32,7 +43,7 @@ function buildPayout(trades: TradePreview[], k: number) {
   const minMu = Math.min(...allPrevMu, ...allTradeMu);
   const maxMu = Math.max(...allPrevMu, ...allTradeMu);
   const maxSig = Math.max(...allPrevSig, ...allTradeSig);
-  const pad = maxSig * 5;
+  const pad = maxSig * 3.5;
   const xMin = minMu - pad;
   const xMax = maxMu + pad;
   const width = xMax - xMin;
@@ -54,7 +65,8 @@ function buildPayout(trades: TradePreview[], k: number) {
     });
     points.push(p);
   }
-  const yPad = Math.max(Math.abs(maxVal - minVal) * 0.1, 0.001);
+  const dataRange = Math.abs(maxVal - minVal);
+  const yPad = Math.max(dataRange * 0.1, 0.001);
   const yLow = minVal === Infinity ? -1 : minVal - yPad;
   const yHigh = maxVal === -Infinity ? 1 : maxVal + yPad;
   return {
@@ -68,17 +80,17 @@ const PayoutChart = memo(function PayoutChart({ trades, k, height = 400 }: Payou
   const { chartData, xDomain, yDomain } = useMemo(() => buildPayout(trades, k), [trades, k]);
 
   if (chartData.length === 0) {
-    return <div className="bg-base-200 rounded-lg p-4 flex items-center justify-center" style={{ height, minHeight: 400 }}><p className="text-base-content/50">No trades yet</p></div>;
+    return <div className="bg-base-200 rounded-lg p-4 flex items-center justify-center" style={{ height, minHeight: 400 }}><p className="text-base-content/50">No trades</p></div>;
   }
 
   return (
     <div className="bg-base-200 rounded-lg p-4" style={{ height, minHeight: 400 }}>
       <h4 className="text-sm font-bold mb-2 text-base-content/70">Trader Payouts (g − f)</h4>
-      <ResponsiveContainer width="100%" height="100%" minHeight={400}>
+      <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-          <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(v > 10000 ? 0 : 1)}k`} />
-          <YAxis domain={yDomain} tick={{ fontSize: 11 }} tickFormatter={v => `$${v.toFixed(2)}`} />
+          <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={fmtX} />
+          <YAxis domain={yDomain} width={65} tick={{ fontSize: 11 }} tickFormatter={fmtY} />
           <Tooltip
             formatter={(value: number, name: string) => {
               if (name.endsWith("_pos")) return null;

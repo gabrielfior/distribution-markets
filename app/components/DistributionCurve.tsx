@@ -16,6 +16,17 @@ interface CurveData {
   k: number;
 }
 
+function fmtY(v: number) {
+  if (v >= 1) return "$" + v.toFixed(2);
+  if (v >= 0.01) return "$" + v.toFixed(4);
+  return "$" + v.toFixed(6);
+}
+
+function fmtX(v: number) {
+  if (v >= 1000) return "$" + (v / 1000).toFixed(v > 10000 ? 0 : 1) + "k";
+  return "$" + v.toFixed(0);
+}
+
 function buildCurve(data: CurveData) {
   const allMus = [data.initialMu, data.currentMu];
   const allSigmas = [data.initialSigma, data.currentSigma];
@@ -26,7 +37,7 @@ function buildCurve(data: CurveData) {
   const minMu = Math.min(...allMus);
   const maxMu = Math.max(...allMus);
   const maxSig = Math.max(...allSigmas);
-  const pad = maxSig * 5;
+  const pad = maxSig * 3.5;
   const xMin = minMu - pad;
   const xMax = maxMu + pad;
   const width = xMax - xMin;
@@ -60,7 +71,7 @@ function buildCurve(data: CurveData) {
   ];
   if (showUser) config.push({ key: "Your prediction", color: DIST_COLORS[1], dash: "5 5" });
 
-  const yMax = maxVal > 0 ? maxVal * 1.1 : 1;
+  const yMax = maxVal > 0 ? maxVal * 1.15 : 1;
 
   return { chartData: points, config, xDomain: [xMin, xMax] as [number, number], yMax };
 }
@@ -82,18 +93,18 @@ const DistributionCurve = memo(function DistributionCurve({ data, height = 400 }
   return (
     <div className="bg-base-200 rounded-lg p-4" style={{ height, minHeight: 400 }}>
       <h4 className="text-sm font-bold mb-2 text-base-content/70">Distributions</h4>
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" aspect={4/3}>
         <AreaChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-          <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(v > 10000 ? 0 : 1)}k`} />
-          <YAxis domain={[0, yMax]} width={60} tick={{ fontSize: 11 }} tickFormatter={v => `$${v.toFixed(2)}`} />
+          <XAxis dataKey="x" type="number" domain={xDomain} tick={{ fontSize: 11 }} tickFormatter={fmtX} />
+          <YAxis domain={[0, yMax]} width={65} tick={{ fontSize: 11 }} tickFormatter={fmtY} />
           <Tooltip
             formatter={(value: number) => value.toFixed(4)}
             labelFormatter={label => `x = $${Number(label).toLocaleString()}`}
           />
           <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
           {config.map(c => (
-            <Area key={c.key} type="monotone" dataKey={c.key} stroke={c.color} strokeWidth={2} strokeDasharray={c.dash} fill={c.color} fillOpacity={0.04} dot={false} isAnimationActive={false} />
+            <Area key={c.key} type="monotone" dataKey={c.key} stroke={c.color} strokeWidth={c.dash ? 2 : 3} strokeDasharray={c.dash} fill={c.color} fillOpacity={0.04} dot={false} isAnimationActive={false} />
           ))}
         </AreaChart>
       </ResponsiveContainer>
