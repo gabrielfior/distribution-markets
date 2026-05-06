@@ -35,11 +35,12 @@ jobs:
         with:
           version: nightly
 
-      - name: Install forge deps
-        run: cd packages/foundry && forge install
-
       - name: Compile smart contracts
-        run: cd packages/foundry && forge build
+        run: |
+          cd packages/foundry
+          forge install foundry-rs/forge-std
+          forge install PaulRBerg/prb-math
+          forge build
 
       - name: Run forge tests
         run: cd packages/foundry && forge test
