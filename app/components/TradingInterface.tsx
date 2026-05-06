@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useDeferredValue, useMemo, useState } from "react";
 import { parseEther } from "viem";
 import { useAccount, useWriteContract } from "wagmi";
 import { useScaffoldReadContract } from "~~/hooks/scaffold-eth";
@@ -50,18 +50,20 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     if (userSigma === null) setUserSigma(currentSigma);
   }, [marketData, currentMu, currentSigma, userMu, userSigma]);
 
-  const mu = userMu ?? currentMu;
-  const sigma = userSigma ?? currentSigma;
+  const muRaw = userMu ?? currentMu;
+  const sigmaRaw = userSigma ?? currentSigma;
+  const mu = useDeferredValue(muRaw);
+  const sigma = useDeferredValue(sigmaRaw);
 
   const collateral = useMemo(() => {
-    if (sigma <= 0 || mu <= 0 || k <= 0) return 0;
-    return computeCollateral(k, currentMu, currentSigma, mu, sigma);
-  }, [k, currentMu, currentSigma, mu, sigma]);
+    if (sigmaRaw <= 0 || muRaw <= 0 || k <= 0) return 0;
+    return computeCollateral(k, currentMu, currentSigma, muRaw, sigmaRaw);
+  }, [k, currentMu, currentSigma, muRaw, sigmaRaw]);
 
   const { total: totalEthToSend } = useMemo(() => {
     if (collateral <= 0) return { total: 0, fees: 0 };
-    return computeTotalToSend(collateral, sigma);
-  }, [collateral, sigma]);
+    return computeTotalToSend(collateral, sigmaRaw);
+  }, [collateral, sigmaRaw]);
 
   const handleTrade = async () => {
     if (!address || !chainId) {
@@ -104,7 +106,17 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
 
   if (isLoading) return <div className="text-center p-8">Loading market...</div>;
 
-  const previewTrade = {
+  const curveData = useMemo(() => ({
+    initialMu,
+    initialSigma,
+    currentMu,
+    currentSigma,
+    userMu: mu !== currentMu ? mu : undefined,
+    userSigma: sigma !== currentSigma ? sigma : undefined,
+    k,
+  }), [initialMu, initialSigma, currentMu, currentSigma, mu, sigma, k]);
+
+  const previewTrades = useMemo(() => [{
     label: `Your trade (μ=${mu.toFixed(0)}, σ=${sigma.toFixed(0)})`,
     prevMu: currentMu,
     prevSigma: currentSigma,
@@ -112,32 +124,15 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     tradeSigma: sigma,
     collateral: collateral,
     k: k,
-  };
+  }], [mu, sigma, currentMu, currentSigma, collateral, k]);
 
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Market Visualization</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <DistributionCurve
-          data={{
-            initialMu,
-            initialSigma,
-            currentMu,
-            currentSigma,
-            userMu: mu !== currentMu ? mu : undefined,
-            userSigma: sigma !== currentSigma ? sigma : undefined,
-            k,
-          }}
-          height={400}
-        />
-        <PayoutChart
-          trades={[previewTrade]}
-          currentMu={currentMu}
-          currentSigma={currentSigma}
-          k={k}
-          height={400}
-        />
+        <DistributionCurve data={curveData} height={400} />
+        <PayoutChart trades={previewTrades} k={k} height={400} />
       </div>
 
       <div className="bg-base-200 p-6 rounded-lg">
@@ -166,14 +161,14 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Expected Price (μ): <span className="text-primary">${mu.toLocaleString()}</span>
+                Expected Price (μ): <span className="text-primary">${muRaw.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
               min={Math.round(currentMu * 0.5)}
               max={Math.round(currentMu * 1.5)}
-              value={mu}
+              value={muRaw}
               step={1}
               onChange={e => setUserMu(Number(e.target.value))}
               className="range range-primary w-full"
@@ -183,19 +178,19 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           <div>
             <label className="label">
               <span className="label-text font-medium">
-                Confidence (σ): <span className="text-secondary">{sigma.toLocaleString()}</span>
+                Confidence (σ): <span className="text-secondary">{sigmaRaw.toLocaleString()}</span>
               </span>
             </label>
             <input
               type="range"
               min={Math.max(Math.round(sigmaMin), 1)}
               max={Math.round(currentSigma * 3)}
-              value={sigma}
+              value={sigmaRaw}
               step={1}
               onChange={e => setUserSigma(Number(e.target.value))}
               className="range range-secondary w-full"
             />
-            {sigma < sigmaMin && (
+            {sigmaRaw < sigmaMin && (
               <p className="text-error text-sm mt-1">σ below minimum. Increase width.</p>
             )}
           </div>
