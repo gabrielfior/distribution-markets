@@ -26,9 +26,13 @@ export default function MarketCard({ market }: { market: Market }) {
             </span>
           </div>
           <DistributionCurve
-            marketMu={market.marketMu}
-            marketSigma={market.marketSigma}
-            actualPrice={market.currentPrice}
+            data={{
+              initialMu: market.marketMu,
+              initialSigma: market.marketSigma,
+              currentMu: market.marketMu,
+              currentSigma: market.marketSigma,
+              k: 1,
+            }}
             height={180}
           />
         </div>
