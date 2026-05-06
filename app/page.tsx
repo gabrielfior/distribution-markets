@@ -3,10 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { parseEther } from "viem";
-import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
+import { useAccount, useWriteContract } from "wagmi";
+import { useScaffoldReadContract } from "~~/hooks/scaffold-eth";
 import { notification } from "~~/utils/scaffold-eth";
 
 export default function Home() {
+  const { address, chainId } = useAccount();
   const [showCreate, setShowCreate] = useState(false);
   const [question, setQuestion] = useState("");
   const [mu, setMu] = useState(3200);
@@ -19,13 +21,15 @@ export default function Home() {
     watch: true,
   });
 
-  const { writeContractAsync, isPending } = useScaffoldWriteContract({
-    contractName: "DistributionMarket",
-  });
+  const { writeContractAsync, isPending } = useWriteContract();
 
   const count = marketCount ? Number(marketCount) : 0;
 
   const handleCreate = async () => {
+    if (!address || !chainId) {
+      notification.error("Connect your wallet first");
+      return;
+    }
     if (!question) {
       notification.error("Enter a question");
       return;
@@ -33,6 +37,21 @@ export default function Home() {
     try {
       const endTime = BigInt(Math.floor(Date.now() / 1000) + 14 * 24 * 3600);
       await writeContractAsync({
+        address: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0" as `0x${string}`,
+        abi: [
+          {
+            type: "function",
+            name: "createMarket",
+            inputs: [
+              { name: "question", type: "string", internalType: "string" },
+              { name: "endTime", type: "uint256", internalType: "uint256" },
+              { name: "mu", type: "int256", internalType: "int256" },
+              { name: "sigma", type: "uint256", internalType: "uint256" },
+            ],
+            outputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
+            stateMutability: "payable",
+          },
+        ],
         functionName: "createMarket",
         args: [question, endTime, BigInt(mu) * BigInt(1e18), BigInt(sigma) * BigInt(1e18)],
         value: parseEther(backing.toString()),
@@ -40,7 +59,7 @@ export default function Home() {
       notification.success("Market created!");
       setShowCreate(false);
     } catch (e: any) {
-      notification.error(e.message || "Creation failed");
+      notification.error(e?.shortMessage || e?.message || "Creation failed");
     }
   };
 
@@ -142,6 +161,7 @@ function MarketListItem({ marketId }: { marketId: number }) {
   const sigma = Number(marketData[1]) / 1e18;
   const b = Number(marketData[2]) / 1e18;
   const resolved = marketData[4];
+  const resolvedOutcome = Number(marketData[5]) / 1e18;
 
   return (
     <Link href={`/trade/${marketId}`} className="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow">
