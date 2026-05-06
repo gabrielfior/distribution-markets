@@ -45,12 +45,13 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
   const sigmaMin = calcSigmaMin(k, b);
 
   useEffect(() => {
-    if (userMu === null) setUserMu(currentMu || initialMu);
-    if (userSigma === null && sigmaMin > 0) setUserSigma(Math.max(Math.ceil(sigmaMin) + 1, Math.ceil(currentSigma * 0.8)));
-  }, [currentMu, initialMu, currentSigma, sigmaMin, userMu, userSigma]);
+    if (!marketData) return;
+    if (userMu === null) setUserMu(currentMu);
+    if (userSigma === null) setUserSigma(currentSigma);
+  }, [marketData, currentMu, currentSigma, userMu, userSigma]);
 
   const mu = userMu ?? currentMu;
-  const sigma = userSigma ?? Math.max(Math.ceil(sigmaMin) + 1, Math.ceil(currentSigma * 0.8));
+  const sigma = userSigma ?? currentSigma;
 
   const collateral = useMemo(() => {
     if (sigma <= 0 || mu <= 0 || k <= 0) return 0;
