@@ -1,83 +1,124 @@
-# 🏗 Scaffold-ETH 2
+# Distribution Markets
 
-<h4 align="center">
-  <a href="https://docs.scaffoldeth.io">Documentation</a> |
-  <a href="https://scaffoldeth.io">Website</a>
-</h4>
+On-chain prediction markets where traders submit probability distributions over continuous outcomes, not discrete binary shares. Inspired by [Paradigm's Distribution Markets paper](https://www.paradigm.xyz/2024/12/distribution-markets).
 
-🧪 An open-source, up-to-date toolkit for building decentralized applications (dapps) on the Ethereum blockchain. It's designed to make it easier for developers to create and deploy smart contracts and build user interfaces that interact with those contracts.
+Built with Scaffold-ETH 2 (NextJS, RainbowKit, Foundry, Wagmi, Viem).
 
-> [!NOTE]
-> 🤖 Scaffold-ETH 2 is AI-ready! It has everything agents need to build on Ethereum. Check `.agents/`, `.claude/`, `.opencode` or `.cursor/` for more info.
+## Architecture
 
-⚙️ Built using NextJS, RainbowKit, Foundry, Wagmi, Viem, and Typescript.
+### Smart Contracts (`packages/foundry/`)
 
-- ✅ **Contract Hot Reload**: Your frontend auto-adapts to your smart contract as you edit it.
-- 🪝 **[Custom hooks](https://docs.scaffoldeth.io/hooks/)**: Collection of React hooks wrapper around [wagmi](https://wagmi.sh/) to simplify interactions with smart contracts with typescript autocompletion.
-- 🧱 [**Components**](https://docs.scaffoldeth.io/components/): Collection of common web3 components to quickly build your frontend.
-- 🔥 **Burner Wallet & Local Faucet**: Quickly test your application with a burner wallet and local faucet.
-- 🔐 **Integration with Wallet Providers**: Connect to different wallet providers and interact with the Ethereum network.
+- **DistributionMarket.sol** — L2 invariant AMM: create markets, trade with Gaussian distributions, resolve outcomes, claim payouts, add liquidity, withdraw fees
+- **NormalDistribution.sol** — Math library (Normal PDF, L2 norm, sigma_min, k invariant) via PRB-Math fixed-point arithmetic
 
-![Debug Contracts tab](https://github.com/scaffold-eth/scaffold-eth-2/assets/55535804/b237af0c-5027-4849-a5c1-2e31495cccb1)
+#### Contract model
+- Market initialized with backing **b** (ETH), mean **μ**, std **σ**
+- Invariant **k = ‖f₀‖₂** stays constant across trades
+- Trade shifts the market distribution: **f_old → g_new** where **‖g‖₂ = k**
+- Collateral **c = −min(g−f)** computed off-chain by client
+- Payout at outcome **x\***: max(0, min(c + g(x\*) − f(x\*), c × 10))
+- Solvency constraint: **σ ≥ k² / (b² √π)**
 
-## Requirements
+### Frontend
 
-Before you begin, you need to install the following tools:
-
-- [Node (>= v20.18.3)](https://nodejs.org/en/download/)
-- Yarn ([v1](https://classic.yarnpkg.com/en/docs/install/) or [v2+](https://yarnpkg.com/getting-started/install))
-- [Git](https://git-scm.com/downloads)
+- Two-panel Streamlit-style charts (Recharts): Distributions + Trader Payouts
+- Trade history table with batch-read from contract
+- Create market form, market list, trade interface with μ/σ range sliders
+- Wallet connection via RainbowKit (MetaMask, WalletConnect, burner wallet)
 
 ## Quickstart
 
-To get started with Scaffold-ETH 2, follow the steps below:
+### Prerequisites
 
-1. Install dependencies if it was skipped in CLI:
+- [Node >= v20](https://nodejs.org/)
+- [Yarn](https://yarnpkg.com/)
+- [Foundry](https://book.getfoundry.sh/getting-started/installation)
 
-```
-cd my-dapp-example
+### Local development
+
+```bash
+# Terminal 1: install dependencies
 yarn install
+cd packages/foundry && forge install
+
+# Terminal 2: start local chain (Anvil)
+cd packages/foundry && anvil
+
+# Terminal 3: deploy contracts to local chain
+cd packages/foundry
+forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
+
+# Terminal 4: start frontend
+yarn dev
 ```
 
-2. Run a local network in the first terminal:
+Open http://localhost:3000. Connect your wallet (burner wallet for localhost, or MetaMask with `localhost:8545` network).
 
-```
-yarn chain
-```
+### Running tests
 
-This command starts a local Ethereum network using Foundry. The network runs on your local machine and can be used for testing and development. You can customize the network configuration in `packages/foundry/foundry.toml`.
-
-3. On a second terminal, deploy the test contract:
-
-```
-yarn deploy
+```bash
+cd packages/foundry && forge test
 ```
 
-This command deploys a test smart contract to the local network. The contract is located in `packages/foundry/contracts` and can be modified to suit your needs. The `yarn deploy` command uses the deploy script located in `packages/foundry/script` to deploy the contract to the network. You can also customize the deploy script.
+27 tests covering:
+- Normal PDF accuracy, symmetry, L2 norm
+- Market creation, trading, solvency, resolution, claims
+- LP liquidity provision, fee withdrawal
+- Edge cases (reverts, double claims, expiry)
 
-4. On a third terminal, start your NextJS app:
+## Deployment
+
+### Tenderly Virtual Testnet (current)
+
+Contracts are deployed on Tenderly Polygon Virtual Testnet (chain 999137):
+
+| Contract | Address |
+|----------|---------|
+| `DistributionMarket` | `0x087a81350ed3173E184da87E4F81601516102b80` |
+
+To deploy an update:
+```bash
+cd packages/foundry
+forge script script/Deploy.s.sol --rpc-url tenderly --broadcast
+```
+
+To fund accounts on Tenderly:
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"tenderly_setBalance","params":["0x...", "0x8AC7230489E80000"],"id":1}' \
+  https://virtual.polygon.eu.rpc.tenderly.co/5f02cc89-4f33-4376-ae33-96831393c9f1
+```
+
+### Adding a new network
+
+1. Add RPC endpoint to `packages/foundry/foundry.toml`
+2. Add chain definition to `scaffold.config.ts`
+3. Add contract address + ABI to `contracts/externalContracts.ts`
+4. Deploy: `forge script script/Deploy.s.sol --rpc-url <network> --broadcast`
+
+## Project Structure
 
 ```
-yarn start
+packages/foundry/
+├── contracts/
+│   ├── DistributionMarket.sol    # Main AMM contract
+│   └── NormalDistribution.sol    # Math library
+├── test/
+│   ├── DistributionMarket.t.sol  # 18 integration tests
+│   └── NormalDistribution.t.sol  # 9 unit tests
+├── script/
+│   └── Deploy.s.sol              # Deployment script
+└── foundry.toml                  # Foundry config
+
+app/
+├── page.tsx                      # Home page (market list + create)
+├── trade/[id]/page.tsx           # Trade interface
+├── components/
+│   ├── TradingInterface.tsx      # Trade UI + charts
+│   ├── DistributionCurve.tsx     # Distribution line chart
+│   ├── PayoutChart.tsx           # Payout curve chart
+│   └── MarketCard.tsx            # Market preview card
+
+contracts/externalContracts.ts    # Deployed contract ABIs + addresses
+utils/distributionMath.ts         # JS mirror of Solidity math
 ```
-
-Visit your app on: `http://localhost:3000`. You can interact with your smart contract using the `Debug Contracts` page. You can tweak the app config in `packages/nextjs/scaffold.config.ts`.
-
-Run smart contract test with `yarn foundry:test`
-
-- Edit your smart contracts in `packages/foundry/contracts`
-- Edit your frontend homepage at `packages/nextjs/app/page.tsx`. For guidance on [routing](https://nextjs.org/docs/app/building-your-application/routing/defining-routes) and configuring [pages/layouts](https://nextjs.org/docs/app/building-your-application/routing/pages-and-layouts) checkout the Next.js documentation.
-- Edit your deployment scripts in `packages/foundry/script`
-
-
-## Documentation
-
-Visit our [docs](https://docs.scaffoldeth.io) to learn how to start building with Scaffold-ETH 2.
-
-To know more about its features, check out our [website](https://scaffoldeth.io).
-
-## Contributing to Scaffold-ETH 2
-
-We welcome contributions to Scaffold-ETH 2!
-
-Please see [CONTRIBUTING.MD](https://github.com/scaffold-eth/scaffold-eth-2/blob/main/CONTRIBUTING.md) for more information and guidelines for contributing to Scaffold-ETH 2.
