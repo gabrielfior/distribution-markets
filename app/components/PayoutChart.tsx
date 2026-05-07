@@ -55,7 +55,7 @@ function buildPayout(trades: TradePreview[], k: number) {
 
   let minVal = Infinity;
   let maxVal = -Infinity;
-  const points: Record<string, number>[] = [];
+  const points: Record<string, number | undefined>[] = [];
   for (let x = xMin; x <= xMax; x += step) {
     const p: Record<string, number | undefined> = { x: Math.round(x) };
     trades.forEach(t => {

@@ -49,7 +49,7 @@ export default function Home() {
               { name: "sigma", type: "uint256", internalType: "uint256" },
             ],
             outputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-            stateMutability: "payable",
+            stateMutability: "payable" as const,
           },
         ],
         functionName: "createMarket",

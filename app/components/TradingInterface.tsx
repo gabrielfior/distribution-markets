@@ -64,7 +64,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
           { name: "feePaid", type: "uint256", internalType: "uint256" },
           { name: "claimed", type: "bool", internalType: "bool" },
         ],
-        stateMutability: "view",
+        stateMutability: "view" as const,
       }],
       functionName: "getTrade",
       args: [BigInt(marketId), BigInt(idx)],
@@ -88,7 +88,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
     if (!tradesBatch || tradesBatch.length === 0) return [];
     return tradesBatch.map((r, i) => {
       if (!r.result) return null;
-      const d = r.result as readonly [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean];
+      const d = r.result as unknown as readonly [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean];
       return {
         index: i,
         trader: d[0],
@@ -196,7 +196,7 @@ export default function TradingInterface({ marketId }: TradingInterfaceProps) {
             { name: "mu", type: "int256", internalType: "int256" },
             { name: "sigma", type: "uint256", internalType: "uint256" },
           ],
-          outputs: [], stateMutability: "payable",
+          outputs: [], stateMutability: "payable" as const,
         }],
         functionName: "trade",
         args: [BigInt(marketId), BigInt(Math.round(mu * SCALE)), BigInt(Math.round(sigma * SCALE))],
