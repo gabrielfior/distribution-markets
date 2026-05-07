@@ -57,7 +57,7 @@ function buildPayout(trades: TradePreview[], k: number) {
   let maxVal = -Infinity;
   const points: Record<string, number>[] = [];
   for (let x = xMin; x <= xMax; x += step) {
-    const p: Record<string, number> = { x: Math.round(x) };
+    const p: Record<string, number | undefined> = { x: Math.round(x) };
     trades.forEach(t => {
       const prevScaled = scaledPDF(x, t.prevMu, t.prevSigma, k);
       const tradeScaled = scaledPDF(x, t.tradeMu, t.tradeSigma, k);
